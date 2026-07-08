@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Research output
+research/
+deep-research-*/
+*.ERROR.md
+brief.html
+
+# Never commit secrets
+*key*.txt
+*-key.txt
+secrets/
+.env
+.env.*
+
+# OS
+.DS_Store
