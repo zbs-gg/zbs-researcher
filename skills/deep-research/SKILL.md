@@ -20,12 +20,19 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
 
 1. **Capture the launch directory before resolving plugin paths**, then probe
    the live connectors from that directory. Never `cd` into the plugin and
-   accidentally make it the research owner:
+   accidentally make it the research owner. Resolve `SKILL_DIR` from the
+   absolute directory containing the **loaded** `SKILL.md`; this path is
+   supplied during skill discovery on Codex and other hosts. Do not assume
+   `CLAUDE_PLUGIN_ROOT` exists, and never execute the placeholder below—replace
+   it with the discovered absolute directory in every shell call:
    ```bash
    LAUNCH_CWD="$(pwd -P)"
-   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   SKILL_DIR="<absolute directory containing the loaded SKILL.md>"
+   SCRIPT="$SKILL_DIR/scripts/deep-research.py"
+   test -f "$SCRIPT"
    printf 'launch_cwd=%s\n' "$LAUNCH_CWD"
-   (cd "$LAUNCH_CWD" && python3 "$SCRIPT" --list-connectors)
+   (cd "$LAUNCH_CWD" && python3 "$SCRIPT" --list-connectors \
+       --launch-cwd "$LAUNCH_CWD")
    ```
    Record the printed absolute path. Shell variables may not survive between
    tool calls, so later calls must reassign `LAUNCH_CWD` to this captured
@@ -49,9 +56,11 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    the runner. Use the resolved topic, not an unexpanded placeholder:
    ```bash
    LAUNCH_CWD="/absolute/path/printed-in-step-1"
-   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+   SCRIPT="$SKILL_DIR/scripts/deep-research.py"
    TOPIC="RESOLVED TOPIC"
-   RUN_DIR="$(cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" --allocate-run)"
+   RUN_DIR="$(cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" \
+       --allocate-run --launch-cwd "$LAUNCH_CWD")"
    printf 'run_dir=%s\n' "$RUN_DIR"
    ```
    The default owner is the launch directory's Git top-level, or the captured
@@ -59,13 +68,17 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    actual project, pass the intended owner explicitly during allocation:
    ```bash
    LAUNCH_CWD="/absolute/path/printed-in-step-1"
-   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+   SCRIPT="$SKILL_DIR/scripts/deep-research.py"
    TOPIC="RESOLVED TOPIC"
    PROJECT_ROOT="/absolute/path/to/intended/project"
    RUN_DIR="$(cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" \
-       --allocate-run --project-root "$PROJECT_ROOT")"
+       --allocate-run --launch-cwd "$LAUNCH_CWD" \
+       --project-root "$PROJECT_ROOT")"
    printf 'run_dir=%s\n' "$RUN_DIR"
    ```
+   Allocation writes only `_topic.txt`, which binds the reservation to the
+   exact topic. It does not start connectors.
 6. **Write `research-plan.md` inside the absolute run path printed in step 5
    before starting connectors.** Use the normal file-writing tool, not a
    placeholder shell echo. The plan must name the resolved topic/entities,
@@ -77,17 +90,19 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    and do not derive a path independently:
    ```bash
    LAUNCH_CWD="/absolute/path/printed-in-step-1"
-   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+   SCRIPT="$SKILL_DIR/scripts/deep-research.py"
    TOPIC="RESOLVED TOPIC"
    RUN_DIR="/absolute/path/printed-in-step-5"
    (cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" \
-       --output-dir "$RUN_DIR")
+       --launch-cwd "$LAUNCH_CWD" --output-dir "$RUN_DIR" --prepared-run)
    ```
    Add `--only`, `--skip`, and repeated `--q name:query` options from the
    written plan. Afterward, read the reports and write `synthesis.md` beside
    `research-plan.md`; if a brief is useful, render it there too:
    ```bash
-   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+   SCRIPT="$SKILL_DIR/scripts/deep-research.py"
    RUN_DIR="/absolute/path/printed-in-step-5"
    python3 "$SCRIPT" --render-html "$RUN_DIR/synthesis.md" \
        --html-out "$RUN_DIR/brief.html"
@@ -159,9 +174,15 @@ optional `brief.html` all share one directory.
 The Python command is also available as a **low-level raw-evidence runner**.
 A direct topic run does not author `research-plan.md`, `synthesis.md`, or
 `brief.html`; the calling agent or person owns those higher-level artifacts.
+Plain `--output-dir` remains an intentionally permissive raw-run override.
+Skill orchestration must add `--prepared-run`, which verifies the exact topic
+reservation, a non-empty `research-plan.md`, and the absence of prior raw
+artifacts, then atomically claims the run before writing. A crashed claim stays
+fail-closed; deliberate recovery uses the low-level override after inspection.
 
 ```bash
-SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+SCRIPT="$SKILL_DIR/scripts/deep-research.py"
 
 # discover live connectors without creating a run
 python3 "$SCRIPT" --list-connectors
@@ -197,6 +218,7 @@ A **complete skill-authored bundle** is self-contained:
 <project>/research/deep-research-{slug}-{date}[-NN]/
 ├── research-plan.md      — resolved scope, channel aims, contradictions
 ├── _topic.txt            — what was asked
+├── .raw-run.claim        — hidden atomic single-writer marker
 ├── manifest.json         — what ran / was skipped / errored, timings
 ├── gemini-youtube.md     — Gemini findings
 ├── grok-x.md             — Grok findings (X)

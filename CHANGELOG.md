@@ -16,6 +16,20 @@ Unreleased package update for project-local research ownership.
 - Probe and render-only operations remain read-only with respect to run
   allocation, and deterministic path/documentation/version checks now run in
   the no-paid-API selftest.
+- Ambiguous or malformed legacy CLI shapes now fail before allocation:
+  positional topic plus `--topic`, `--only` plus `--skip`, unknown connector
+  names, malformed `--q`, blank explicit paths, `--html-out` without render,
+  and `--allocate-run` combined with raw-run options. Use one topic form, one
+  connector selector, non-blank paths, and a separate allocation call.
+- Skill commands resolve the runner from the host-discovered `SKILL.md`
+  directory, so Codex does not depend on Claude's `CLAUDE_PLUGIN_ROOT`.
+- Skill allocation now stamps `_topic.txt`; the subsequent connector call uses
+  `--prepared-run` to require that exact topic, a non-empty plan, and no prior
+  raw artifacts, then atomically claims the directory against concurrent or
+  stale reuse. Reusing plain `--output-dir` remains an explicit low-level
+  compatibility behavior.
+- Skill commands also pass the captured directory through `--launch-cwd`, so
+  ownership does not change if an agent's process cwd drifts between tool calls.
 
 ## 0.1.0 — 2026-07-08
 

@@ -37,6 +37,7 @@ skill = texts["skill"]
 for artifact in (
     "research-plan.md",
     "_topic.txt",
+    ".raw-run.claim",
     "manifest.json",
     "gemini-youtube.md",
     "grok-x.md",
@@ -55,7 +56,16 @@ for artifact in (
         problems.append(f"skill output contract is missing {artifact}")
 
 required_markers = {
-    "skill": ("--allocate-run", '--output-dir "$RUN_DIR"', "complete skill-authored bundle", "raw-evidence runner"),
+    "skill": (
+        "--allocate-run",
+        '--output-dir "$RUN_DIR"',
+        "complete skill-authored bundle",
+        "raw-evidence runner",
+        "--prepared-run",
+        "--launch-cwd",
+        "supplied during skill discovery on Codex",
+        'SCRIPT="$SKILL_DIR/scripts/deep-research.py"',
+    ),
     "readme": ("complete skill-authored bundle", "raw-evidence runner", "--project-root"),
     "cli": ("raw-evidence runner", "not a research plan or synthesis"),
 }
@@ -65,10 +75,49 @@ for name, markers in required_markers.items():
         if marker.lower() not in lowered:
             problems.append(f"{files[name]} is missing contract marker: {marker}")
 
+ordered_skill_markers = (
+    "## STEP 0 — RESEARCH PLAN",
+    "--allocate-run",
+    "research-plan.md",
+    '--output-dir "$RUN_DIR"',
+    "synthesis.md",
+)
+positions = [skill.find(marker) for marker in ordered_skill_markers]
+if any(position < 0 for position in positions) or positions != sorted(positions):
+    problems.append(
+        "skill must order STEP 0 as allocation -> research-plan.md -> "
+        "raw-evidence runner -> synthesis.md"
+    )
+
+if "${CLAUDE_PLUGIN_ROOT}" in skill:
+    problems.append("skill commands must not depend on CLAUDE_PLUGIN_ROOT")
+
+output_module = root / "skills/deep-research/scripts/output_paths.py"
+if not output_module.is_file():
+    problems.append(f"packaged runner is missing sibling module: {output_module}")
+
 if problems:
     raise SystemExit("\n".join(problems))
 print("   packaged docs describe one complete skill bundle and a raw CLI boundary")
 PY
+
+PROJECT="$OUT/project"
+SECRETS="$OUT/no-secrets"
+mkdir -p "$PROJECT" "$SECRETS"
+TOPIC="selftest prepared workflow"
+RUN_DIR="$(cd "$OUT" && python3 "$SCRIPT" "$TOPIC" \
+    --allocate-run --launch-cwd "$PROJECT")"
+topic_marker="$(<"$RUN_DIR/_topic.txt")"
+test "$topic_marker" = "$TOPIC"
+printf '# Selftest research plan\n' > "$RUN_DIR/research-plan.md"
+env -u GEMINI_API_KEY DEEP_RESEARCH_SECRETS_DIR="$SECRETS" \
+    python3 "$SCRIPT" "$TOPIC" --output-dir "$RUN_DIR" \
+    --prepared-run --launch-cwd "$PROJECT" --only gemini >/dev/null 2>&1
+test -s "$RUN_DIR/research-plan.md"
+test -s "$RUN_DIR/manifest.json"
+runs=("$PROJECT"/research/deep-research-*)
+test "${#runs[@]}" -eq 1
+echo "   prepared plan-first handoff reused exactly one run"
 
 echo "3/6 plugin metadata agreement…"
 python3 - "$ROOT" <<'PY'
@@ -88,6 +137,10 @@ if plugin["version"] != expected or listed["version"] != expected:
 changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 if f"## {expected}" not in changelog or "project-local" not in changelog.lower():
     raise SystemExit("changelog is missing the 0.2.0 project-local behavior entry")
+lowered_changelog = changelog.lower()
+for marker in ("ambiguous or malformed", "--only", "--skip", "blank explicit paths"):
+    if marker not in lowered_changelog:
+        raise SystemExit(f"changelog is missing CLI compatibility marker: {marker}")
 print(f"   plugin + marketplace = {expected}; changelog entry present")
 PY
 

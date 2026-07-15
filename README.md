@@ -61,14 +61,19 @@ invokes it automatically when a task needs multi-source diligence).
 The skill is the complete workflow: it allocates one run under the launching
 project's `research/` directory, writes the plan first, gathers channel
 evidence there, and adds the session-authored synthesis and optional HTML
-brief as siblings.
+brief as siblings. Its connector call uses `--prepared-run`, so a lost or
+stale run path cannot overwrite a completed bundle or mix topics.
 
 The commands below expose the lower-level **raw-evidence runner**. A direct
 topic run writes connector output and `manifest.json`; it does not author a
 research plan, synthesis, or brief.
 
 ```bash
-SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+# Set this to the directory containing the installed skill's SKILL.md.
+# Agents receive that absolute path during skill discovery; no Claude-only
+# environment variable is required.
+SKILL_DIR="/absolute/path/to/skills/deep-research"
+SCRIPT="$SKILL_DIR/scripts/deep-research.py"
 
 # what's live right now (read-only; creates no run)
 python3 "$SCRIPT" --list-connectors
@@ -93,9 +98,14 @@ python3 "$SCRIPT" --render-html ./research/existing-run/synthesis.md
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
-reserves and prints an empty unique run for the skill's plan-first workflow.
-The skill passes that exact directory back via `--output-dir` after writing
-`research-plan.md`.
+reserves and prints a unique run containing only its `_topic.txt` marker. The
+skill passes that exact directory back via `--output-dir --prepared-run` after
+writing `research-plan.md`; the prepared handoff requires the matching topic,
+a non-empty plan, and no prior raw-run artifacts, then creates one atomic
+`.raw-run.claim`. Plain `--output-dir` remains an intentionally permissive
+low-level override for deliberate recovery after inspection.
+`--launch-cwd /absolute/project/path` pins project discovery and relative raw
+paths to the directory captured before an agent visits the skill/plugin tree.
 
 ## Output ownership
 
@@ -105,6 +115,7 @@ A complete skill-authored bundle stays together:
 <project>/research/deep-research-{slug}-{date}[-NN]/
 ├── research-plan.md
 ├── _topic.txt
+├── .raw-run.claim         # hidden single-writer marker
 ├── manifest.json
 ├── <channel>.md (or <channel>.ERROR.md)
 ├── synthesis.md
