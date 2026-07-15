@@ -13,7 +13,8 @@ bill Anthropic or OpenAI APIs by default**.
 
 - **Plan first.** Every run starts by resolving the topic (exact @handles,
   subreddits, repos, whether it's a forecastable event or a hiring-market
-  question) and showing a short plan — then executes. No cold keyword blasts.
+  question), writes a short `research-plan.md` into the project-local run,
+  and only then executes. No cold keyword blasts or detached plan files.
 - **No Anthropic/OpenAI spend by default.** Retrieval runs on Gemini (Google),
   Grok (xAI), and Perplexity plus free direct connectors. Synthesis happens in
   your Claude Code session. The OpenAI channel is opt-in.
@@ -57,25 +58,65 @@ invokes it automatically when a task needs multi-source diligence).
 
 ## Quickstart
 
+The skill is the complete workflow: it allocates one run under the launching
+project's `research/` directory, writes the plan first, gathers channel
+evidence there, and adds the session-authored synthesis and optional HTML
+brief as siblings.
+
+The commands below expose the lower-level **raw-evidence runner**. A direct
+topic run writes connector output and `manifest.json`; it does not author a
+research plan, synthesis, or brief.
+
 ```bash
 SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
 
-# what's live right now (the plan step)
+# what's live right now (read-only; creates no run)
 python3 "$SCRIPT" --list-connectors
 
-# a full run (every available connector, in parallel)
-python3 "$SCRIPT" "LLM long-context memory failure modes" \
-    --output-dir ~/research/deep-research-longctx-2026-07-08
+# raw connector evidence, automatically allocated under this project's research/
+python3 "$SCRIPT" "LLM long-context memory failure modes"
 
 # free hiring-market read for a skill/tech
-python3 "$SCRIPT" "context engineering" --output-dir ~/research/hire --only hiring
+python3 "$SCRIPT" "context engineering" --only hiring
 
-# render a shareable brief from your synthesis
-python3 "$SCRIPT" --render-html ~/research/.../synthesis.md --html-out ~/research/.../brief.html
+# monorepo/package ownership override
+python3 "$SCRIPT" "context engineering" \
+    --project-root /absolute/path/to/project --only hackernews,hiring
+
+# intentional standalone destination (bypasses project-root allocation)
+python3 "$SCRIPT" "context engineering" \
+    --output-dir ./scratch/hiring-evidence --only hiring
+
+# render an existing synthesis beside it (or add --html-out for another name)
+python3 "$SCRIPT" --render-html ./research/existing-run/synthesis.md
 ```
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
-channel; `--max-items N` sets items per direct channel.
+channel; `--max-items N` sets items per direct channel. `--allocate-run`
+reserves and prints an empty unique run for the skill's plan-first workflow.
+The skill passes that exact directory back via `--output-dir` after writing
+`research-plan.md`.
+
+## Output ownership
+
+A complete skill-authored bundle stays together:
+
+```text
+<project>/research/deep-research-{slug}-{date}[-NN]/
+├── research-plan.md
+├── _topic.txt
+├── manifest.json
+├── <channel>.md (or <channel>.ERROR.md)
+├── synthesis.md
+└── brief.html (optional)
+```
+
+The launch directory is captured before plugin-path resolution. Its Git
+top-level owns the default run; outside Git, the captured directory does. Use
+`--project-root` when a narrower monorepo package should own the research.
+Repeated same-topic runs reserve numbered siblings instead of overwriting.
+An explicit `--output-dir` remains a direct-CLI escape hatch and may point
+outside the project intentionally.
 
 ## Requirements
 

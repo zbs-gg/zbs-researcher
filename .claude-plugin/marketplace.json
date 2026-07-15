@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "deep-research",
-      "description": "Plan-first multi-channel deep research + Claude synthesis. No Anthropic/OpenAI API spend by default.",
-      "version": "0.1.0",
+      "description": "Plan-first project-local multi-channel deep research + Claude synthesis. No Anthropic/OpenAI API spend by default.",
+      "version": "0.2.0",
       "author": {
         "name": "Nikita Shilov",
         "url": "https://github.com/nkkmnk"

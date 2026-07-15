@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 — 2026-07-15
+
+Unreleased package update for project-local research ownership.
+
+- Skill runs now reserve one unique
+  `<project>/research/deep-research-{slug}-{date}[-NN]/` directory and write
+  `research-plan.md` before starting connectors.
+- Raw reports, `manifest.json`, session-authored `synthesis.md`, and optional
+  `brief.html` are colocated with the plan instead of using detached global
+  defaults.
+- Direct CLI runs allocate project-local raw-evidence bundles by default;
+  `--project-root` narrows monorepo ownership and explicit `--output-dir`
+  destinations remain supported.
+- Probe and render-only operations remain read-only with respect to run
+  allocation, and deterministic path/documentation/version checks now run in
+  the no-paid-API selftest.
+
 ## 0.1.0 — 2026-07-08
 
 Initial plugin packaging of the deep-research skill.

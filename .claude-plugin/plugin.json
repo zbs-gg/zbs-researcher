@@ -1,7 +1,7 @@
 {
   "name": "deep-research",
-  "version": "0.1.0",
-  "description": "Plan-first multi-channel deep research — Gemini/Grok/Perplexity lenses + free direct connectors (Hacker News, hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis. Does not bill Anthropic/OpenAI APIs by default.",
+  "version": "0.2.0",
+  "description": "Plan-first project-local deep research — Gemini/Grok/Perplexity lenses + free direct connectors (Hacker News, hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis. Does not bill Anthropic/OpenAI APIs by default.",
   "author": {
     "name": "Nikita Shilov",
     "url": "https://github.com/nkkmnk"

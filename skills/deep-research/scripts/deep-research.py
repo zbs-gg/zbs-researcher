@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deep research orchestrator: many channels in parallel + synthesis.
+Deep research raw-evidence runner: many channels in parallel.
 
 Two channel families run concurrently and write one markdown file each:
 
@@ -14,15 +14,19 @@ Two channel families run concurrently and write one markdown file each:
   Direct channels (zero-config, free; give STRUCTURAL signal an LLM
   won't hand you — raw numbers, odds, velocity):
     - hackernews  HN Algolia -> stories ranked by points/comments
+    - hiring      HN "Who is hiring?" -> topic mentions and sample companies
     - polymarket  Gamma markets -> real-money odds on the topic
     - github      repo search -> stars, recent activity, top issues
     - reddit      search.json -> top posts by upvotes (best-effort; Reddit
                   throttles unauthenticated JSON, degrades to ERROR.md)
     - bluesky     app.bsky searchPosts (best-effort)
 
-Claude (the caller) does synthesis after channels return, reading the
-report files, then optionally renders a shareable HTML brief via
-`--render-html`.
+The deep-research skill owns the higher-level workflow: it reserves one
+project-local run with `--allocate-run`, writes `research-plan.md` before
+connectors start, calls this runner with that exact `--output-dir`, then writes
+`synthesis.md` and optionally renders `brief.html`. A direct topic invocation
+is intentionally lower level: it writes raw channel reports and manifest.json,
+not a research plan or synthesis.
 
 Channels are independent; if one fails it writes <name>.ERROR.md and the
 others continue. A manifest.json records what ran, what was skipped, and why.
@@ -34,13 +38,22 @@ Usage:
     # discover what's live (used by the plan step before any run)
     python3 deep-research.py --list-connectors
 
-    # run (default = every available connector)
-    python3 deep-research.py "TOPIC" --output-dir DIR
-    python3 deep-research.py "TOPIC" --output-dir DIR --only gemini,hackernews,polymarket
-    python3 deep-research.py "TOPIC" --output-dir DIR --skip reddit,bluesky
+    # direct raw run (default = every available connector); output is uniquely
+    # allocated beneath the launch project's research/ directory
+    python3 deep-research.py "TOPIC"
+    python3 deep-research.py "TOPIC" --only gemini,hackernews,polymarket
+    python3 deep-research.py "TOPIC" --project-root /path/to/project
+
+    # skill orchestration: reserve first, write research-plan.md, then run into
+    # the exact reserved directory
+    python3 deep-research.py "TOPIC" --allocate-run
+    python3 deep-research.py "TOPIC" --output-dir /path/to/reserved-run
+
+    # explicit raw-output override bypasses project-root allocation
+    python3 deep-research.py "TOPIC" --output-dir ./scratch/run --skip reddit,bluesky
 
     # per-channel query aim
-    python3 deep-research.py --topic T --output-dir D \\
+    python3 deep-research.py --topic T \\
         --q gemini:"YouTube talks on X" --q openai:"Reddit/HN on X"
     # legacy aliases still work: --gemini-q --grok-q --openai-q
 
@@ -883,10 +896,15 @@ def list_connectors_json():
 
 def main():
     launch_cwd = Path.cwd().resolve()
-    ap = argparse.ArgumentParser(description="Deep research: multi-channel parallel pull + synthesis")
+    ap = argparse.ArgumentParser(
+        description="Deep research raw-evidence runner: multi-channel parallel pull"
+    )
     ap.add_argument("topic", nargs="?", help="Topic to research")
     ap.add_argument("--topic", dest="topic2")
-    ap.add_argument("--output-dir")
+    ap.add_argument(
+        "--output-dir",
+        help="explicit raw-output directory (bypasses project-local allocation)",
+    )
     ap.add_argument(
         "--project-root",
         help="project that owns default research output (default: Git root or launch cwd)",

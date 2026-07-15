@@ -12,15 +12,24 @@ top-ranked summary.
 
 ## STEP 0 — RESEARCH PLAN (mandatory, before any run)
 
-**Never fire the script cold.** Every invocation starts with a short
-research plan shown to Nik, then the run. This is the rule Nik set on
-2026-07-08: *"когда вызываешь ресёрч — сначала план ресёрча, потом запуск."*
+**Never fire the connectors cold.** Every skill invocation creates one
+self-contained bundle in the project from which the skill was launched. The
+meaningful research plan must exist inside that bundle before connector work
+starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь ресёрч —
+сначала план ресёрча, потом запуск."*
 
-1. **Check what's live** — run the connector probe so the plan is built on
-   reality, not assumptions:
+1. **Capture the launch directory before resolving plugin paths**, then probe
+   the live connectors from that directory. Never `cd` into the plugin and
+   accidentally make it the research owner:
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py" --list-connectors
+   LAUNCH_CWD="$(pwd -P)"
+   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   printf 'launch_cwd=%s\n' "$LAUNCH_CWD"
+   (cd "$LAUNCH_CWD" && python3 "$SCRIPT" --list-connectors)
    ```
+   Record the printed absolute path. Shell variables may not survive between
+   tool calls, so later calls must reassign `LAUNCH_CWD` to this captured
+   literal; do not recalculate it after visiting another directory.
 2. **Resolve the topic** (this is where the quality comes from — borrowed
    from last30days' pre-research idea). Don't search raw keywords; first
    name the concrete entities:
@@ -31,15 +40,58 @@ research plan shown to Nik, then the run. This is the rule Nik set on
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 9 connectors run
+3. **Pick channels + aim each one.** Decide which of the 10 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
    in the disagreements, so say up front what tension you're probing.
-
-Show this as a compact plan (topic resolution · channels + rationale ·
-per-channel queries · expected contradictions). Then run. For anything
-non-trivial also drop a copy under `~/elle/plans/` per the plan-first rule.
+5. **Show the compact plan**, then reserve exactly one run directory through
+   the runner. Use the resolved topic, not an unexpanded placeholder:
+   ```bash
+   LAUNCH_CWD="/absolute/path/printed-in-step-1"
+   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   TOPIC="RESOLVED TOPIC"
+   RUN_DIR="$(cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" --allocate-run)"
+   printf 'run_dir=%s\n' "$RUN_DIR"
+   ```
+   The default owner is the launch directory's Git top-level, or the captured
+   launch directory outside Git. If a monorepo's Git root is broader than the
+   actual project, pass the intended owner explicitly during allocation:
+   ```bash
+   LAUNCH_CWD="/absolute/path/printed-in-step-1"
+   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   TOPIC="RESOLVED TOPIC"
+   PROJECT_ROOT="/absolute/path/to/intended/project"
+   RUN_DIR="$(cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" \
+       --allocate-run --project-root "$PROJECT_ROOT")"
+   printf 'run_dir=%s\n' "$RUN_DIR"
+   ```
+6. **Write `research-plan.md` inside the absolute run path printed in step 5
+   before starting connectors.** Use the normal file-writing tool, not a
+   placeholder shell echo. The plan must name the resolved topic/entities,
+   research questions and scope, selected channels with rationale, exact
+   per-channel queries, expected contradictions, and what evidence would
+   answer the request. Record the captured launch directory and any explicit
+   project-root choice.
+7. **Run connectors into that exact directory.** Do not allocate a second run
+   and do not derive a path independently:
+   ```bash
+   LAUNCH_CWD="/absolute/path/printed-in-step-1"
+   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   TOPIC="RESOLVED TOPIC"
+   RUN_DIR="/absolute/path/printed-in-step-5"
+   (cd "$LAUNCH_CWD" && python3 "$SCRIPT" "$TOPIC" \
+       --output-dir "$RUN_DIR")
+   ```
+   Add `--only`, `--skip`, and repeated `--q name:query` options from the
+   written plan. Afterward, read the reports and write `synthesis.md` beside
+   `research-plan.md`; if a brief is useful, render it there too:
+   ```bash
+   SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
+   RUN_DIR="/absolute/path/printed-in-step-5"
+   python3 "$SCRIPT" --render-html "$RUN_DIR/synthesis.md" \
+       --html-out "$RUN_DIR/brief.html"
+   ```
 
 ## Budget rule — no Anthropic / OpenAI API by default
 
@@ -100,39 +152,50 @@ optionally renders a shareable `brief.html`.
 
 ## How to run
 
+The complete workflow is the skill orchestration in STEP 0: allocation,
+`research-plan.md`, raw channel evidence, session-authored `synthesis.md`, and
+optional `brief.html` all share one directory.
+
+The Python command is also available as a **low-level raw-evidence runner**.
+A direct topic run does not author `research-plan.md`, `synthesis.md`, or
+`brief.html`; the calling agent or person owns those higher-level artifacts.
+
 ```bash
-# discover live connectors (the plan step)
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py" --list-connectors
+SCRIPT="${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py"
 
-# default = every available connector, in parallel
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/deep-research/scripts/deep-research.py" "TOPIC" \
-    --output-dir ~/research/deep-research-{slug}-{date}
+# discover live connectors without creating a run
+python3 "$SCRIPT" --list-connectors
 
-# scope the channels
-… "TOPIC" --output-dir DIR --only gemini,perplexity,hackernews,polymarket
-… "TOPIC" --output-dir DIR --skip reddit,bluesky
+# direct default: raw evidence in a unique project-local research run
+python3 "$SCRIPT" "TOPIC" --only gemini,perplexity,hackernews,polymarket
 
-# hiring-market hotness for a skill/tech (free): how many postings mention it + who
-… "context engineering" --output-dir DIR --only hiring
-# GPT lens (OPT-IN — bills OpenAI API, only on Nik's OK)
-… "TOPIC" --output-dir DIR --only openai
+# narrow ownership below a broader Git root (for example, a monorepo package)
+python3 "$SCRIPT" "TOPIC" --project-root /absolute/path/to/project --only hiring
 
-# aim each channel (repeatable --q name:query; legacy --gemini-q/--grok-q/--openai-q still work)
-… --topic "long-context memory failure modes" --output-dir DIR \
+# explicit raw-output override: bypasses project-root resolution and allocation
+python3 "$SCRIPT" "TOPIC" --output-dir ./scratch/research-run --skip reddit,bluesky
+
+# aim each channel (repeatable --q name:query)
+python3 "$SCRIPT" --topic "long-context memory failure modes" \
     --q gemini:"YouTube talks 2026 on long-context retrieval failures" \
-    --q grok:"X threads long context degradation real reports" \
-    --q openai:"Reddit/HN/GitHub issues long-context memory bugs LangChain LlamaIndex"
+    --q grok:"X threads long context degradation real reports"
 
-# after writing synthesis.md, render a shareable HTML brief
-… --render-html DIR/synthesis.md --html-out DIR/brief.html
+# render an existing synthesis beside its markdown input by default
+python3 "$SCRIPT" --render-html ./research/existing-run/synthesis.md
+
+# GPT lens (OPT-IN — bills OpenAI API, only on Nik's OK)
+python3 "$SCRIPT" "TOPIC" --output-dir ./scratch/openai-run --only openai
 ```
 
 `--max-items N` controls items per direct channel (default 10).
 
 ## Output layout
 
+A **complete skill-authored bundle** is self-contained:
+
 ```
-research/deep-research-{slug}-{date}/
+<project>/research/deep-research-{slug}-{date}[-NN]/
+├── research-plan.md      — resolved scope, channel aims, contradictions
 ├── _topic.txt            — what was asked
 ├── manifest.json         — what ran / was skipped / errored, timings
 ├── gemini-youtube.md     — Gemini findings
@@ -145,9 +208,14 @@ research/deep-research-{slug}-{date}/
 ├── github.md             — top repos + recent issues
 ├── reddit.md             — top posts (or ERROR.md)
 ├── bluesky.md            — top posts (or ERROR.md)
-├── synthesis.md          — Claude: overlaps, contradictions, recommendation
+├── synthesis.md          — session: overlaps, contradictions, recommendation
 └── brief.html            — optional shareable dark-mode HTML (self-contained)
 ```
+
+A direct raw-runner invocation creates the unique project-local directory and
+writes only `_topic.txt`, `manifest.json`, and the selected channel files. An
+explicit `--output-dir` keeps intentional standalone output wherever the
+caller requested it. Probe and render-only modes allocate no research run.
 
 ## Tech detail
 
