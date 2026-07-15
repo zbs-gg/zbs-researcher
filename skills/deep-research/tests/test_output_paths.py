@@ -80,6 +80,15 @@ class OutputPathTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "project root"):
                 deep_research.resolve_project_root(launch_cwd, missing)
 
+    def test_allocator_does_not_create_a_missing_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp).resolve() / "missing"
+
+            with self.assertRaisesRegex(ValueError, "project root"):
+                deep_research.allocate_run_directory(missing, "Mobile RTS")
+
+            self.assertFalse(missing.exists())
+
     def test_explicit_output_directory_wins_and_relative_is_launch_relative(self):
         with tempfile.TemporaryDirectory() as tmp:
             launch_cwd = Path(tmp).resolve()

@@ -233,13 +233,14 @@ def _run_component(slug, run_date, attempt, name_max):
 def allocate_run_directory(project_root, topic, run_date=None, name_max=None):
     """Atomically reserve and return a unique project-local research run."""
     project_root = Path(project_root).resolve()
-    if not project_root.is_dir():
+    research_root = project_root / RESEARCH_DIR_NAME
+    try:
+        research_root.mkdir(exist_ok=True)
+    except (FileNotFoundError, NotADirectoryError) as exc:
         raise ValueError(
             f"project root is not an existing directory: {project_root}"
-        )
+        ) from exc
 
-    research_root = project_root / RESEARCH_DIR_NAME
-    research_root.mkdir(parents=True, exist_ok=True)
     run_date = run_date or time.strftime("%Y-%m-%d")
     name_max = name_max or _filesystem_name_max(research_root)
     slug = topic_slug(topic)
@@ -984,6 +985,7 @@ def main():
 
     if args.output_dir:
         out_dir = resolve_output_directory(args.output_dir, launch_cwd)
+        out_dir.mkdir(parents=True, exist_ok=True)
     else:
         try:
             project_root = resolve_project_root(launch_cwd, args.project_root)
@@ -991,7 +993,6 @@ def main():
         except ValueError as exc:
             ap.error(str(exc))
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "_topic.txt").write_text(topic + "\n")
 
     manifest = {
