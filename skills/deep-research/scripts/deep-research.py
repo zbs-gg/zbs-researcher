@@ -48,6 +48,7 @@ Usage:
     python3 deep-research.py --render-html DIR/synthesis.md --html-out DIR/brief.html
 """
 import argparse
+import hashlib
 import html as html_mod
 import json
 import os
@@ -57,6 +58,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -114,6 +116,130 @@ KEYS = {
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_MODEL = os.environ.get("OPENAI_RESEARCH_MODEL", "gpt-5.4")
 PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_RESEARCH_MODEL", "sonar")
+
+RUN_PREFIX = "deep-research-"
+RESEARCH_DIR_NAME = "research"
+FALLBACK_NAME_MAX = 255
+
+
+# ---------------------------------------------------------------------------
+# Project-local output paths
+# ---------------------------------------------------------------------------
+def _launch_relative_path(value, launch_cwd):
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path(launch_cwd) / path
+    return path.resolve()
+
+
+def resolve_output_directory(output_dir, launch_cwd):
+    """Resolve an explicit output override from the captured launch cwd."""
+    return _launch_relative_path(output_dir, launch_cwd)
+
+
+def resolve_project_root(launch_cwd, explicit_root=None):
+    """Resolve explicit root, Git top-level, or the captured cwd in that order."""
+    launch_cwd = Path(launch_cwd).resolve()
+    if explicit_root is not None:
+        root = _launch_relative_path(explicit_root, launch_cwd)
+        if not root.is_dir():
+            raise ValueError(f"project root is not an existing directory: {root}")
+        return root
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(launch_cwd), "rev-parse", "--show-toplevel"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return launch_cwd
+
+    if result.returncode == 0 and result.stdout.strip():
+        root = Path(result.stdout.strip()).resolve()
+        if root.is_dir():
+            return root
+    return launch_cwd
+
+
+def topic_slug(topic):
+    """Return a normalized, deterministic directory slug for a topic."""
+    normalized = unicodedata.normalize("NFKC", topic).casefold()
+    parts = []
+    pending_separator = False
+    for char in normalized:
+        if char.isalnum():
+            if pending_separator and parts:
+                parts.append("-")
+            parts.append(char)
+            pending_separator = False
+        else:
+            pending_separator = True
+    slug = "".join(parts)
+    if slug:
+        return slug
+    digest = hashlib.sha256(topic.encode("utf-8")).hexdigest()[:8]
+    return f"topic-{digest}"
+
+
+def _filesystem_name_max(path):
+    try:
+        value = os.pathconf(str(path), "PC_NAME_MAX")
+    except (AttributeError, OSError, ValueError):
+        return FALLBACK_NAME_MAX
+    return value if isinstance(value, int) and value > 0 else FALLBACK_NAME_MAX
+
+
+def _truncate_utf8(value, byte_limit):
+    if byte_limit <= 0:
+        return ""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= byte_limit:
+        return value
+    return encoded[:byte_limit].decode("utf-8", errors="ignore")
+
+
+def _run_component(slug, run_date, attempt, name_max):
+    suffix = "" if attempt == 1 else f"-{attempt:02d}"
+    fixed = f"{RUN_PREFIX}{run_date}{suffix}"
+    slug_budget = name_max - len(fixed.encode("utf-8")) - 1
+    if slug_budget < 1:
+        raise ValueError(
+            f"filesystem name limit {name_max} is too small for a research run"
+        )
+    trimmed_slug = _truncate_utf8(slug, slug_budget)
+    if not trimmed_slug:
+        raise ValueError(
+            f"filesystem name limit {name_max} is too small for a research run slug"
+        )
+    return f"{RUN_PREFIX}{trimmed_slug}-{run_date}{suffix}"
+
+
+def allocate_run_directory(project_root, topic, run_date=None, name_max=None):
+    """Atomically reserve and return a unique project-local research run."""
+    project_root = Path(project_root).resolve()
+    if not project_root.is_dir():
+        raise ValueError(
+            f"project root is not an existing directory: {project_root}"
+        )
+
+    research_root = project_root / RESEARCH_DIR_NAME
+    research_root.mkdir(parents=True, exist_ok=True)
+    run_date = run_date or time.strftime("%Y-%m-%d")
+    name_max = name_max or _filesystem_name_max(research_root)
+    slug = topic_slug(topic)
+
+    attempt = 1
+    while True:
+        component = _run_component(slug, run_date, attempt, name_max)
+        candidate = research_root / component
+        try:
+            candidate.mkdir(exist_ok=False)
+            return candidate
+        except FileExistsError:
+            attempt += 1
 
 
 # ---------------------------------------------------------------------------
@@ -579,12 +705,38 @@ def select_connectors(only, skip):
         chosen = [CONNECTORS[c] for c in want]
     else:
         skipset = {c.strip() for c in (skip or "").split(",") if c.strip()}
+        unknown = sorted(skipset.difference(CONNECTORS))
+        if unknown:
+            print(f"error: unknown connector(s): {', '.join(unknown)}", file=sys.stderr)
+            sys.exit(2)
         chosen = [c for c in CONNECTORS.values() if c.default and c.name not in skipset]
     # drop LLM channels whose key is missing (record the skip)
     live, skipped = [], []
     for c in chosen:
         (live if c.available() else skipped).append(c)
     return live, skipped
+
+
+def parse_query_overrides(args):
+    overrides = {}
+    for spec in args.q:
+        if ":" not in spec:
+            raise ValueError(f"invalid --q value (expected name:query): {spec}")
+        name, query = (part.strip() for part in spec.split(":", 1))
+        if not name or not query:
+            raise ValueError(f"invalid --q value (expected name:query): {spec}")
+        if name not in CONNECTORS:
+            raise ValueError(f"unknown connector in --q: {name}")
+        overrides[name] = query
+
+    for name, value in (
+        ("gemini", args.gemini_q),
+        ("grok", args.grok_q),
+        ("openai", args.openai_q or args.openai_q_legacy),
+    ):
+        if value:
+            overrides[name] = value
+    return overrides
 
 
 # ---------------------------------------------------------------------------
@@ -730,17 +882,28 @@ def list_connectors_json():
 
 
 def main():
+    launch_cwd = Path.cwd().resolve()
     ap = argparse.ArgumentParser(description="Deep research: multi-channel parallel pull + synthesis")
     ap.add_argument("topic", nargs="?", help="Topic to research")
     ap.add_argument("--topic", dest="topic2")
     ap.add_argument("--output-dir")
+    ap.add_argument(
+        "--project-root",
+        help="project that owns default research output (default: Git root or launch cwd)",
+    )
     ap.add_argument("--only", help="comma list: run ONLY these connectors")
     ap.add_argument("--skip", help="comma list: skip these connectors")
     ap.add_argument("--max-items", type=int, default=10, help="items per direct channel (default 10)")
     ap.add_argument("--q", action="append", default=[], metavar="name:query",
                     help="per-channel query override, repeatable (e.g. --q gemini:\"...\")")
-    ap.add_argument("--list-connectors", action="store_true", help="print connector availability as JSON and exit")
-    ap.add_argument("--render-html", metavar="MD", help="render a markdown file to a shareable HTML brief")
+    modes = ap.add_mutually_exclusive_group()
+    modes.add_argument("--list-connectors", action="store_true", help="print connector availability as JSON and exit")
+    modes.add_argument("--render-html", metavar="MD", help="render a markdown file to a shareable HTML brief")
+    modes.add_argument(
+        "--allocate-run",
+        action="store_true",
+        help="reserve a project-local run directory, print it, and exit",
+    )
     ap.add_argument("--html-out", metavar="HTML", help="output path for --render-html")
     # legacy aliases
     ap.add_argument("--gemini-q")
@@ -748,6 +911,9 @@ def main():
     ap.add_argument("--openai-q")
     ap.add_argument("--gpt-q", dest="openai_q_legacy", help=argparse.SUPPRESS)
     args = ap.parse_args()
+
+    if args.html_out and not args.render_html:
+        ap.error("--html-out requires --render-html")
 
     if args.list_connectors:
         list_connectors_json()
@@ -758,30 +924,57 @@ def main():
         render_html(args.render_html, out)
         return
 
+    if args.topic and args.topic2:
+        ap.error("provide topic either positionally or with --topic, not both")
     topic = args.topic or args.topic2
-    if not topic:
-        print("error: topic required (positional or --topic)", file=sys.stderr)
-        sys.exit(1)
-    if not args.output_dir:
-        print("error: --output-dir required for a research run", file=sys.stderr)
-        sys.exit(1)
+    if not topic or not topic.strip():
+        ap.error("topic required (positional or --topic)")
 
-    out_dir = Path(args.output_dir).expanduser()
+    if args.only and args.skip:
+        ap.error("--only and --skip cannot be used together")
+
+    if args.allocate_run:
+        if args.output_dir:
+            ap.error("--allocate-run cannot be combined with --output-dir")
+        if any(
+            (
+                args.only,
+                args.skip,
+                args.q,
+                args.gemini_q,
+                args.grok_q,
+                args.openai_q,
+                args.openai_q_legacy,
+            )
+        ):
+            ap.error("--allocate-run cannot be combined with connector options")
+        try:
+            project_root = resolve_project_root(launch_cwd, args.project_root)
+            out_dir = allocate_run_directory(project_root, topic)
+        except ValueError as exc:
+            ap.error(str(exc))
+        print(out_dir)
+        return
+
+    try:
+        overrides = parse_query_overrides(args)
+    except ValueError as exc:
+        ap.error(str(exc))
+
+    # Validate connector selection before creating a default run directory.
+    live, skipped = select_connectors(args.only, args.skip)
+
+    if args.output_dir:
+        out_dir = resolve_output_directory(args.output_dir, launch_cwd)
+    else:
+        try:
+            project_root = resolve_project_root(launch_cwd, args.project_root)
+            out_dir = allocate_run_directory(project_root, topic)
+        except ValueError as exc:
+            ap.error(str(exc))
+
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "_topic.txt").write_text(topic + "\n")
-
-    # per-channel query overrides
-    overrides = {}
-    for spec in args.q:
-        if ":" in spec:
-            name, q = spec.split(":", 1)
-            overrides[name.strip()] = q.strip()
-    for name, val in (("gemini", args.gemini_q), ("grok", args.grok_q),
-                      ("openai", args.openai_q or args.openai_q_legacy)):
-        if val:
-            overrides[name] = val
-
-    live, skipped = select_connectors(args.only, args.skip)
 
     manifest = {
         "topic": topic,
