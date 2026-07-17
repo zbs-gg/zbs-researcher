@@ -5,7 +5,7 @@ triangulates a topic across reasoning-model lenses **and** raw platform
 signal, then synthesizes the contradictions — not just the top-ranked
 summary.
 
-Unlike a single web search, it pulls in parallel from up to **10 connectors**
+Unlike a single web search, it pulls in parallel from up to **11 connectors**
 and, crucially, **produces a research plan before it runs** and **does not
 bill Anthropic or OpenAI APIs by default**.
 
@@ -35,7 +35,8 @@ bill Anthropic or OpenAI APIs by default**.
 | hackernews | direct | free | stories by points/comments |
 | hiring | direct | free | job-market hotness for a topic |
 | polymarket | direct | free | real-money odds (implied %) |
-| github | direct | free | repo stars, velocity, issues |
+| github | direct | free | repo stars, velocity |
+| github-issues | direct | free | top issues by reactions + comment excerpts |
 | reddit | direct | free* | top posts by upvotes *(best-effort)* |
 | bluesky | direct | free* | top posts *(best-effort)* |
 

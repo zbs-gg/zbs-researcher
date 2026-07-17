@@ -47,7 +47,7 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 10 connectors run
+3. **Pick channels + aim each one.** Decide which of the 11 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -122,7 +122,7 @@ Nik's rule (2026-07-08): **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 10 connectors
+## Architecture — 11 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -142,7 +142,8 @@ you — raw numbers, odds, velocity):
 | **hackernews** | HN Algolia | stories ranked by points/comments |
 | **hiring** | HN "Who is hiring?" | job-market hotness — how many postings mention the topic + which companies (RAG/agents/context-eng spikes) |
 | **polymarket** | Gamma `/public-search` | real-money odds on the topic (implied %) |
-| **github** | repo + issue search (`gh`) | stars, push recency, top issues/PRs |
+| **github** | repo search (`gh`) | stars, push recency |
+| **github-issues** | issue + comment search (`gh`) | top issues by reactions + real comment excerpts — product/competitor evidence; `owner/repo` query scopes to one repo |
 | **reddit** | Arctic-Shift archive (free) | reaction-weighted posts — real score+comments, relevance-ranked *(search.json is dead; degrades to ERROR.md)* |
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
 
@@ -195,7 +196,7 @@ AskUserQuestion (modal) where available; the prose fallback below otherwise:
   and never pitch again.
 
 **STEP 2 — Tier-0 proof BEFORE any key ask.** Run the free connectors only —
-`--only hackernews,hiring,polymarket,github,reddit,bluesky` — on a topic the
+`--only hackernews,hiring,polymarket,github,github-issues,reddit,bluesky` — on a topic the
 user gives (or offer one concrete demo topic). Use the normal STEP 0 flow
 above: allocate the run, write `research-plan.md`, run, then show the brief.
 **No paid-key prompt may appear before this real result exists.**
@@ -306,7 +307,8 @@ A **complete skill-authored bundle** is self-contained:
 ├── hackernews.md         — HN stories by points
 ├── hiring.md             — HN Who-is-hiring postings mentioning the topic
 ├── polymarket.md         — market odds (or honest "no markets")
-├── github.md             — top repos + recent issues
+├── github.md             — top repos (stars, push recency)
+├── github-issues.md      — top issues by reactions + comment excerpts
 ├── reddit.md             — top posts (or ERROR.md)
 ├── bluesky.md            — top posts (or ERROR.md)
 ├── synthesis.md          — session: overlaps, contradictions, recommendation
@@ -325,7 +327,7 @@ caller requested it. Probe and render-only modes allocate no research run.
 - OpenAI channel (**opt-in only**) uses gpt-5.4 (non-Pro) via `api.openai.com/v1/responses`. It bills the OpenAI API, so it is not in the default set — enable with `--only openai` on Nik's OK. Pro models are never used; that spend is reserved for `emergency-pro`.
 - Perplexity uses `sonar` (env `PERPLEXITY_RESEARCH_MODEL` to override).
 - If a channel fails (quota, network, key, throttle) it writes `<name>.ERROR.md` and records the error in `manifest.json`; other channels continue.
-- Direct channels are free and need no key. `github` prefers authed `gh` (higher rate limit), falls back to unauthenticated API.
+- Direct channels are free and need no key. `github` and `github-issues` prefer authed `gh` (higher rate limit), fall back to unauthenticated API.
 - HTML brief renders with a built-in mini markdown→HTML converter (no external deps); output is fully self-contained (inline CSS, system-font fallbacks behind Inter/JetBrains Mono) — safe to hand to Nik or share.
 
 ## Limits

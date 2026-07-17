@@ -20,7 +20,9 @@ Two channel families run concurrently and write one markdown file each:
     - hackernews  HN Algolia -> stories ranked by points/comments
     - hiring      HN "Who is hiring?" -> topic mentions and sample companies
     - polymarket  Gamma markets -> real-money odds on the topic
-    - github      repo search -> stars, recent activity, top issues
+    - github      repo search -> stars, recent activity
+    - github-issues  issue search -> top issues by reactions + comment
+                  excerpts (real user voice; repo-scoped via `owner/repo`)
     - reddit      Arctic-Shift archive -> reaction-weighted posts (real
                   score+comments; reddit.com/search.json is dead)
     - bluesky     app.bsky searchPosts (best-effort)
@@ -652,25 +654,29 @@ def channel_polymarket(query, out_path, max_items):
     return len(events)
 
 
-def channel_github(query, out_path, max_items):
-    """Repo + issue search. Prefer authed `gh` (higher rate limit); fall
-    back to unauthenticated api.github.com search."""
-    def gh_api(path):
-        if shutil.which("gh"):
-            r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
-            if r.returncode == 0:
-                return json.loads(r.stdout)
-        return get_json("https://api.github.com/" + path, timeout=25)
+def gh_api(path):
+    """GitHub REST GET (path relative to the API root). Prefers the authed
+    `gh` CLI when installed (higher rate limit); falls back to unauthenticated
+    api.github.com. Shared by channel_github and channel_github_issues."""
+    if shutil.which("gh"):
+        r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            return json.loads(r.stdout)
+    return get_json("https://api.github.com/" + path, timeout=25)
 
+
+def channel_github(query, out_path, max_items):
+    """Repo search: stars + push recency. Issue/PR signal moved to the
+    dedicated github-issues connector (R11) — the old "Recent issues / PRs"
+    section here was duplicate signal (review decision)."""
     repos = gh_api(
         "search/repositories?" + urllib.parse.urlencode({"q": query, "sort": "stars", "per_page": max_items})
     )
-    issues = gh_api(
-        "search/issues?"
-        + urllib.parse.urlencode({"q": f"{query} in:title", "sort": "updated", "per_page": max_items})
-    )
+    items = repos.get("items", [])[:max_items]
     lines = [f"# GitHub — for: {query}\n", "## Top repositories (by stars)\n"]
-    for r in repos.get("items", [])[:max_items]:
+    if not items:
+        lines.append("_No repositories found._\n")
+    for r in items:
         lines.append(
             f"- **{r.get('full_name')}** — ★{r.get('stargazers_count',0):,}, "
             f"pushed {(r.get('pushed_at') or '')[:10]}"
@@ -678,16 +684,107 @@ def channel_github(query, out_path, max_items):
         if r.get("description"):
             lines.append(f"  - {r['description']}")
         lines.append(f"  - {r.get('html_url')}")
-    lines.append("\n## Recent issues / PRs mentioning it\n")
-    for it in issues.get("items", [])[:max_items]:
-        kind = "PR" if it.get("pull_request") else "issue"
+    lines.append(
+        "\n_Issue + comment evidence lives in the github-issues connector "
+        "(github-issues.md)._"
+    )
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(items)
+
+
+_GH_REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+_GH_ISSUES_COMMENT_ISSUES = 5      # top issues that get comment excerpts
+_GH_ISSUES_COMMENTS_PER_ISSUE = 5  # comment excerpts per issue
+_GH_ISSUES_COMMENT_CHARS = 280     # excerpt truncation length
+
+
+def _gh_reactions(obj):
+    """total_count from a GitHub `reactions` sub-object (search issue items
+    and comment bodies both carry one)."""
+    return (obj.get("reactions") or {}).get("total_count") or 0
+
+
+def channel_github_issues(query, out_path, max_items):
+    """Issues + comment bodies as product/competitor evidence (R11).
+
+    Two modes:
+      - topic (default): search issues everywhere sorted by reactions, then
+        rank client-side via rank_items (reactions = engagement, comment
+        count = corroboration, relevance floor vs the topic);
+      - owner/repo (query matches `owner/repo`): top issues of that repo by
+        reactions, server order kept — there is no topic to rank against.
+
+    For the top few issues the comment bodies are pulled (capped + truncated)
+    so the report carries actual user voice, not just titles. A failed
+    comment fetch degrades that one issue (note line), never the siblings.
+    Zero-config Tier 0: authed `gh` preferred, anonymous fallback; a hard
+    search failure (e.g. HTTP 403 rate limit) propagates so run_connector
+    writes ERROR.md."""
+    topic = query.strip()
+    repo_mode = bool(_GH_REPO_RE.match(topic))
+    q = f"repo:{topic} is:issue" if repo_mode else f"{topic} is:issue"
+    pool = max_items if repo_mode else min(30, max(15, max_items * 3))
+    found = gh_api(
+        "search/issues?"
+        + urllib.parse.urlencode({"q": q, "sort": "reactions", "order": "desc", "per_page": pool})
+    )
+    items = found.get("items", [])
+    note = None
+    if repo_mode:
+        issues = items[:max_items]
+    else:
+        for it in items:
+            it["_rank_text"] = f"{it.get('title') or ''} {(it.get('body') or '')[:400]}"
+            it["_reactions"] = _gh_reactions(it)
+        ranked = rank_items(
+            items,
+            topic,
+            text_key="_rank_text",
+            engagement_key="_reactions",
+            comments_key="comments",
+            max_items=max_items,
+        )
+        issues, note = ranked.items, ranked.note
+
+    scope = (
+        f"repo {topic} — top issues by reactions (server order)"
+        if repo_mode
+        else "issue search ranked by reactions + comment corroboration"
+    )
+    lines = [f"# GitHub issues — for: {query}\n", f"_Scope: {scope}._\n"]
+    if note:
+        lines.append(f"_Note: {note}._\n")
+    if not issues:
+        lines.append("_No issues found._\n")
+    for pos, it in enumerate(issues):
         lines.append(
-            f"- [{kind}] **{it.get('title')}** — {it.get('comments',0)} comments, "
+            f"- **{it.get('title') or '?'}** — {it.get('state') or '?'}, "
+            f"👍{_gh_reactions(it)} reactions, {it.get('comments') or 0} comments, "
             f"updated {(it.get('updated_at') or '')[:10]}"
         )
         lines.append(f"  - {it.get('html_url')}")
-    out_path.write_text("\n".join(lines) + "\n")
-    return len(repos.get("items", [])) + len(issues.get("items", []))
+        if pos >= _GH_ISSUES_COMMENT_ISSUES or not it.get("comments"):
+            continue
+        repo_path = (it.get("repository_url") or "").rsplit("/repos/", 1)[-1]
+        number = it.get("number")
+        if not repo_path or number is None:
+            continue
+        try:
+            comments = gh_api(
+                f"repos/{repo_path}/issues/{number}/comments?"
+                + urllib.parse.urlencode({"per_page": _GH_ISSUES_COMMENTS_PER_ISSUE})
+            )
+        except Exception as e:  # noqa: BLE001 — one issue's comments never kill siblings
+            lines.append(f"  - _comments unavailable: {str(e)[:120]}_")
+            continue
+        for c in comments[:_GH_ISSUES_COMMENTS_PER_ISSUE]:
+            author = (c.get("user") or {}).get("login") or "?"
+            body = " ".join((c.get("body") or "").split())
+            if len(body) > _GH_ISSUES_COMMENT_CHARS:
+                body = body[:_GH_ISSUES_COMMENT_CHARS].rstrip() + "…"
+            lines.append(f"  - @{author} (👍{_gh_reactions(c)}): {body}")
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(issues)
 
 
 ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api"
@@ -887,7 +984,8 @@ CONNECTORS = {
         Connector("hackernews", "direct", channel_hackernews, "HN Algolia — points/comments", []),
         Connector("hiring", "direct", channel_hiring, "HN Who-is-hiring — job-market hotness for a topic", []),
         Connector("polymarket", "direct", channel_polymarket, "real-money prediction odds", []),
-        Connector("github", "direct", channel_github, "repo stars + velocity + issues", []),
+        Connector("github", "direct", channel_github, "repo stars + velocity", []),
+        Connector("github-issues", "direct", channel_github_issues, "issues + comment evidence (free)", []),
         Connector("reddit", "direct", channel_reddit, "top posts via Arctic-Shift archive (free, score+comments)", []),
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
     ]
@@ -902,6 +1000,7 @@ OUTPUT_NAMES = {
     "hiring": "hiring.md",
     "polymarket": "polymarket.md",
     "github": "github.md",
+    "github-issues": "github-issues.md",
     "reddit": "reddit.md",
     "bluesky": "bluesky.md",
 }
