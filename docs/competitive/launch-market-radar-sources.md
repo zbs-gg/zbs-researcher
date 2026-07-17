@@ -1,15 +1,15 @@
-# Market-pulse sources — launch & revenue/exit platforms
+# Market-radar sources — launch & revenue/exit platforms
 
-_Scan 2026-07-17 (two parallel agents). Reference for building U12 (launch-pulse) + U13 (revenue/exit-pulse). Prices/endpoints are snippet-sourced — **verify live before building** (per U12/U13 execution notes)._
+_Scan 2026-07-17 (two parallel agents). Reference for building U12 (launch-radar) + U13 (revenue/exit-radar). Prices/endpoints are snippet-sourced — **verify live before building** (per U12/U13 execution notes)._
 
 ## Why a separate layer
 
-Discourse sources (Reddit/HN-comments/Telegram) show "what's discussed." Market-pulse shows **action + traction**: what got built, how the maker framed it, and — the part discourse structurally can't give — **what actually sells / sold**. Two sub-layers:
+Discourse sources (Reddit/HN-comments/Telegram) show "what's discussed." Market-radar shows **action + traction**: what got built, how the maker framed it, and — the part discourse structurally can't give — **what actually sells / sold**. Two sub-layers:
 
-- **Launch-pulse** — what's shipping now (momentum, category velocity, maker positioning).
-- **Revenue/exit-pulse** — revenue-verified traction and realized exits (proven value, not launch-day hype).
+- **Launch-radar** — what's shipping now (momentum, category velocity, maker positioning).
+- **Revenue/exit-radar** — revenue-verified traction and realized exits (proven value, not launch-day hype).
 
-## Launch-pulse sources
+## Launch-radar sources
 
 | Source | Access | Cost | Signal | Niche |
 |---|---|---|---|---|
@@ -23,7 +23,7 @@ Discourse sources (Reddit/HN-comments/Telegram) show "what's discussed." Market-
 
 **Shortlist by signal-per-effort:** PH → Show HN (already covered) → yc-oss → MicroLaunch → (Peerlist/Uneed as best-effort).
 
-## Revenue/exit-pulse sources (the additive layer)
+## Revenue/exit-radar sources (the additive layer)
 
 | Source | Access | Cost | Signal | Niche |
 |---|---|---|---|---|
@@ -40,7 +40,7 @@ Discourse sources (Reddit/HN-comments/Telegram) show "what's discussed." Market-
 ## Deliberately skipped
 
 - **TAAFT / Futurepedia / Insidr / AI-directory clones** — re-skin the "new AI tool announced" signal PH already carries, worse freshness, gameable vote metrics. Not additive. (Toolify is the exception — traffic-rank is real.)
-- **AI-consulting market-pulse** — no good launch/trend source exists (services market, no product-launch analog; Clutch/GoodFirms are review-count, not trend). Explicit gap, documented in the plan's Non-goals.
+- **AI-consulting market-radar** — no good launch/trend source exists (services market, no product-launch analog; Clutch/GoodFirms are review-count, not trend). Explicit gap, documented in the plan's Non-goals.
 
 ## Unique signal vs discourse (confirmed by both agents)
 1. Launch-momentum (day-1/week-1 vote velocity = market pull).
