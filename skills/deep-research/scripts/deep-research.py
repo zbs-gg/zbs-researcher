@@ -819,6 +819,11 @@ def main():
         action="store_true",
         help="print an offline doctor report (providers, profile, onboarding state)",
     )
+    modes.add_argument(
+        "--signal",
+        metavar="KIND",
+        help="record a demand signal (want-paid | host-for-me) and exit",
+    )
     ap.add_argument("--html-out", metavar="HTML", help="output path for --render-html")
     # legacy aliases
     ap.add_argument("--gemini-q")
@@ -849,6 +854,21 @@ def main():
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             import detect_state
         print(detect_state.doctor_report())
+        return
+
+    if args.signal:
+        # Sibling module; same import strategy as --diagnose above.
+        try:
+            import signals
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import signals
+        profile = os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client"
+        try:
+            result = signals.record_signal(args.signal, profile=profile)
+        except (ValueError, OSError) as exc:
+            ap.error(str(exc))
+        print(signals.signal_message(args.signal, result.notified))
         return
 
     if args.render_html:
