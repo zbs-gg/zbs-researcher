@@ -1,130 +1,306 @@
 <section class="doc-header">
-  <p class="eyebrow">Requirements-only unified plan · ce-brainstorm</p>
+  <p class="eyebrow">Unified plan · ce-brainstorm → ce-plan</p>
   <h1>ZBS Research — Onboarding Wizard & Tier Model - Plan</h1>
   <dl class="meta">
     <dt>Date</dt><dd><time datetime="2026-07-17">2026-07-17</time></dd>
     <dt>Artifact</dt><dd>ce-unified-plan/v1</dd>
-    <dt>Readiness</dt><dd>requirements-only</dd>
-    <dt>Source</dt><dd>ce-brainstorm</dd>
-    <dt>Scope</dt><dd>Deep — feature (product shape inherited from competitive scan + ideation)</dd>
+    <dt>Readiness</dt><dd>implementation-ready</dd>
+    <dt>Execution</dt><dd>code</dd>
+    <dt>Source</dt><dd>ce-brainstorm (Product Contract) → ce-plan (this enrichment)</dd>
+    <dt>Target repo</dt><dd>zbs-research (paths repo-relative)</dd>
+    <dt>Depth</dt><dd>Deep — phased</dd>
   </dl>
+  <p class="preservation">Product Contract preservation: <b>unchanged</b> — R1–R21 carried verbatim from the requirements-only version; this run adds Planning Contract, Implementation Units, Verification Contract, and Definition of Done.</p>
 </section>
+
+<nav class="jump">
+  <b>Sections:</b>
+  <a href="#goal-capsule">Goal</a> · <a href="#product-contract">Product Contract</a> · <a href="#planning-contract">Planning Contract (KTDs)</a> · <a href="#htd">Design</a> · <a href="#output-structure">Output Structure</a> · <a href="#implementation-units">Implementation Units</a> · <a href="#verification-contract">Verification</a> · <a href="#definition-of-done">Definition of Done</a>
+</nav>
 
 <section id="goal-capsule">
   <h2>Goal Capsule</h2>
-  <p><b>Objective.</b> A PostHog-class onboarding wizard for the ZBS Research skill that takes a client from install to their first deep, multi-source, reaction-weighted research report with the <em>minimum</em> possible connections — ideally zero — and a clear, progressive path to unlock more depth, plus built-in demand signals that measure willingness to pay before anything paid is built.</p>
-  <p><b>Product authority.</b> Nikita (owner). The wizard runs <em>inside</em> the Claude Code agent (the conversation is the wizard), so no separate binary. Free skill under the ZBS brand is the funnel; the paid hypothesis (managed Telegram + done-for-you for CIS niches) is validated by the demand signals, not assumed.</p>
-  <p><b>Decision this run:</b> ship the <b>full wizard with all tiers</b> (Tier 0 → direct keys → OpenRouter → Telegram → TikTok/IG), not a narrow slice — Nik's explicit choice.</p>
-  <p><b>Open blockers:</b> Arctic-Shift score-field availability (load-bearing for Reddit reaction-weighting); OpenRouter↔Perplexity access (smoke-test); where the demand signal lands (see Outstanding Questions).</p>
+  <p><b>Objective.</b> A PostHog-class onboarding wizard for the ZBS Research skill: install → first deep, multi-source, reaction-weighted report with the minimum possible connections (ideally zero), a progressive path to unlock depth, and built-in demand signals that measure willingness to pay before anything paid is built.</p>
+  <p><b>Product authority.</b> Nikita. The wizard runs inside the Claude Code agent (the conversation is the wizard) — no separate binary. Free skill under the ZBS brand is the funnel; the paid hypothesis (managed Telegram + done-for-you for CIS niches) is validated by demand signals, not assumed.</p>
+  <p><b>Scope this run:</b> full wizard, all tiers (Nik's explicit choice), delivered in 3 phases — Phase A (wizard + Tier-0 + demand signals = first wow) first.</p>
+  <p><b>Open blockers (tracked, not gating):</b> Arctic-Shift score fields (load-bearing for Reddit reaction-weighting — U11 verifies); OpenRouter↔Perplexity access (U4 smoke-test); demand-signal destination (KTD3 decides).</p>
 </section>
 
 <section id="product-contract">
   <h2>Product Contract</h2>
+  <p class="note">Carried verbatim from the requirements-only version (ce-brainstorm). Stable R-IDs; planning references them by ID.</p>
 
-  <h3>Primary actor & context</h3>
+  <h3>Primary actor & core outcome</h3>
   <ul>
-    <li><b>Primary:</b> Nik's client — a lite-technical operator on a Claude-Code-compatible agent host, who wants deep research without wiring a zoo of services.</li>
-    <li><b>Secondary:</b> Nik himself (the <em>self</em> profile — power user, local $0 on his Mac); and the Claude Code agent, which executes the wizard as dialogue.</li>
+    <li><b>Primary:</b> Nik's client — a lite-technical operator on a Claude-Code-compatible host, wanting deep research without wiring a zoo of services. <b>Secondary:</b> Nik (self profile, local $0 Mac); the agent (executes the wizard as dialogue).</li>
+    <li><b>Core outcome:</b> in minutes, zero required keys, the client sees a real reaction-weighted report; then chooses, one visible decision at a time, how much depth to unlock — and can signal "I want paid" / "just host it" without any silent account creation.</li>
   </ul>
 
-  <h3>Core outcome</h3>
-  <p>In minutes, with zero required keys, the client sees a real reaction-weighted research report; then chooses, one visible decision at a time, how much more depth to unlock — and can signal "I want the paid version" or "just host it for me" at any point without any silent account creation.</p>
-
-  <h3>Product Requirements</h3>
-
-  <h4>A · The wizard (conversation-as-wizard)</h4>
+  <h3>Requirements (R1–R21)</h3>
   <table>
     <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
     <tbody>
-      <tr><td id="r1">R1</td><td>The wizard <b>is the conversation</b> — driven by <code>AskUserQuestion</code> modal steps on capable hosts, with a prose fallback on Codex/Cursor/Gemini-CLI. No separate installer binary.</td></tr>
-      <tr><td id="r2">R2</td><td>On first run a <b>SessionStart hook detects existing state</b> (which keys/accounts are present) using a fixed lookup order — process env → project config → global config → OS keychain — so the wizard only asks for what it genuinely can't find.</td></tr>
-      <tr><td id="r3">R3</td><td><b>Proof before ask:</b> the wizard runs the $0 Tier-0 path and shows a real result <em>before</em> prompting for any paid key. Proof, not promise.</td></tr>
-      <tr><td id="r4">R4</td><td>The welcome pitch is embedded <b>inside the first wizard question</b>, never sent as a standalone message (Claude Code folds standalone tool output behind "ctrl+o" and it goes unread — last30days #750).</td></tr>
-      <tr><td id="r5">R5</td><td>Each setup path ends with a <b>verification step that proves it works</b> (a real report/segment produced), analogous to PostHog's first-dashboard / Sentry's test-event moment. A <code>--diagnose</code>/doctor self-report shows current state with no network call.</td></tr>
-    </tbody>
-  </table>
-
-  <h4>B · Progressive tiers (each gated behind one visible decision; show what's already unlocked free before pitching the next)</h4>
-  <table>
-    <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
-    <tbody>
-      <tr><td id="r6">R6</td><td><b>Tier 0 — zero keys, works now:</b> Hacker News, Reddit (Arctic-Shift), YouTube, GitHub, Polymarket, Meta Ad Library. This is the default floor; a client with no keys still gets a real report.</td></tr>
-      <tr><td id="r7">R7</td><td><b>Tier 1 — own direct keys:</b> paste a Gemini / Grok key for depth via each provider's native grounded lens (googleSearch, x_search). Independent blast-radius for clients who value reliability.</td></tr>
-      <tr><td id="r8">R8</td><td><b>Tier 2 — one OpenRouter key</b> routes all lenses through a single key. MUST use explicit provider-native tools (not the <code>:online</code> shortcut, which forces search every call), via raw HTTP (wrapper libs have Gemini-grounding bugs). Perplexity access smoke-tested before relied on.</td></tr>
-      <tr><td id="r9">R9</td><td><b>Telegram</b> (the moat): the wizard guides installing Telethon and parses on the client's behalf. It MUST show a hard warning to use a <b>separate / secondary account, never the personal one</b> (ban risk + personal-DM exposure). Explicit opt-in only.</td></tr>
-      <tr><td id="r10">R10</td><td><b>TikTok / Instagram</b> — optional, via a <b>pay-per-use</b> adapter (Apify or ScrapeCreators), for clients who don't want to fiddle with free-but-flaky OSS scrapers. Off by default.</td></tr>
-      <tr><td id="r11">R11</td><td><b>GitHub issues + comments</b> is a <b>first-class scored source</b> (product/competitor intelligence), not just repo search.</td></tr>
-      <tr><td id="r12">R12</td><td><b>LinkedIn is de-prioritized</b> — not in the default set (little original content; mostly reposts). May return later behind a flag.</td></tr>
-    </tbody>
-  </table>
-
-  <h4>C · Demand signals & monetization hooks</h4>
-  <table>
-    <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
-    <tbody>
-      <tr><td id="r13">R13</td><td>An <b>explicit "I want the paid version"</b> action — never a silent auto-mint of third-party accounts (last30days #524 rejected exactly this; explicit opt-in is the intended model).</td></tr>
-      <tr><td id="r14">R14</td><td>An <b>explicit "just host it for me" (managed / done-for-you)</b> action — a separate, clearly-named signal, not a hidden default.</td></tr>
-      <tr><td id="r15">R15</td><td>Both signals are <b>recorded so Nik can measure willingness to pay</b> (who pressed what). The v1 job is measurement, not fulfillment — see Non-goals.</td></tr>
-    </tbody>
-  </table>
-
-  <h4>D · Deployment profiles & budget invariant</h4>
-  <table>
-    <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
-    <tbody>
-      <tr><td id="r16">R16</td><td><b>Two deployment profiles</b>, chosen by config: <em>self</em> (local, $0, Mac — MLX Whisper / local vision) and <em>client/portable</em> (cloud-cheap — Groq Whisper $0.04/hr, Gemini Flash vision sub-cent). Media transcription/vision backend is pluggable, not hardcoded local compute.</td></tr>
-      <tr><td id="r17">R17</td><td><b>Budget invariant:</b> no Anthropic/OpenAI API spend by default. Synthesis happens in the client's own Claude session; the OpenAI channel stays opt-in.</td></tr>
-    </tbody>
-  </table>
-
-  <h4>E · Differentiation baked in (the "why switch from last30days" list, from its own issue tracker)</h4>
-  <table>
-    <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
-    <tbody>
-      <tr><td id="r18">R18</td><td><b>Runs on Windows out of the box.</b> last30days has ~30 Windows-broken issues (SIGALRM/os.killpg/UnicodeEncodeError). ZBS uses stdlib + threading; Windows must be a verified-green target, stated loudly.</td></tr>
-      <tr><td id="r19">R19</td><td><b>Clean security posture.</b> last30days installs flag 🔴 High Risk (#565) — a hard stop for clients. ZBS ships least-privilege + a transparent "what it does / what it sends where," aiming for a clean scan. Plan-first transparency is the trust story.</td></tr>
-      <tr><td id="r20">R20</td><td><b>Install that doesn't fail</b> — passes <code>claude plugin validate</code>, correct <code>skills/&lt;name&gt;/SKILL.md</code> layout (last30days #237/#362 fail the validator).</td></tr>
-      <tr><td id="r21">R21</td><td><b>Smarter ranking than vote-count-only</b> (last30days #641 surfaces off-topic on niche topics): comment-evidence weighting + relevance floor + anti-bot signature (ideation idea #4) — matters most on Nik's niche topics.</td></tr>
+      <tr><td id="r1">R1</td><td>Wizard <b>is the conversation</b> — <code>AskUserQuestion</code> modal + prose fallback (Codex/Cursor). No separate installer binary.</td></tr>
+      <tr><td id="r2">R2</td><td>SessionStart hook <b>detects existing state</b> (keys/accounts) via fixed order: process env → project config → global config → OS keychain. Ask only for what's missing.</td></tr>
+      <tr><td id="r3">R3</td><td><b>Proof before ask:</b> run $0 Tier-0 and show a real result before prompting for any paid key.</td></tr>
+      <tr><td id="r4">R4</td><td>Welcome pitch <b>inside the first wizard question</b>, never a standalone message (last30days #750).</td></tr>
+      <tr><td id="r5">R5</td><td>Each setup path ends with a <b>verification step that proves it works</b>; a <code>--diagnose</code>/doctor self-report shows state with no network call.</td></tr>
+      <tr><td id="r6">R6</td><td><b>Tier 0 — zero keys:</b> HN, Reddit (Arctic-Shift), YouTube, GitHub, Polymarket, Meta Ad Library. Default floor.</td></tr>
+      <tr><td id="r7">R7</td><td><b>Tier 1 — own direct keys:</b> Gemini / Grok native grounded lenses. Independent blast-radius.</td></tr>
+      <tr><td id="r8">R8</td><td><b>Tier 2 — one OpenRouter key</b> routes all lenses. Explicit provider-native tools (not <code>:online</code>), raw HTTP, Perplexity smoke-tested.</td></tr>
+      <tr><td id="r9">R9</td><td><b>Telegram</b> (moat): guide Telethon install, parse on client's behalf. Hard warning: <b>separate/secondary account, never personal.</b> Explicit opt-in.</td></tr>
+      <tr><td id="r10">R10</td><td><b>TikTok / Instagram</b> — optional, <b>pay-per-use</b> adapter (Apify or ScrapeCreators). Off by default.</td></tr>
+      <tr><td id="r11">R11</td><td><b>GitHub issues + comments</b> as a first-class scored source.</td></tr>
+      <tr><td id="r12">R12</td><td><b>LinkedIn de-prioritized</b> — not default (mostly reposts).</td></tr>
+      <tr><td id="r13">R13</td><td>Explicit <b>"I want the paid version"</b> action — never silent auto-mint (last30days #524).</td></tr>
+      <tr><td id="r14">R14</td><td>Explicit <b>"just host it for me"</b> (managed) action — separate named signal.</td></tr>
+      <tr><td id="r15">R15</td><td>Both signals <b>recorded so Nik can measure willingness to pay.</b> v1 = measurement, not fulfillment.</td></tr>
+      <tr><td id="r16">R16</td><td><b>Two deployment profiles</b> by config: self (local $0 Mac) vs client (cloud-cheap). Media backend pluggable.</td></tr>
+      <tr><td id="r17">R17</td><td><b>Budget invariant:</b> no Anthropic/OpenAI API by default; synthesis in client's session; OpenAI opt-in.</td></tr>
+      <tr><td id="r18">R18</td><td><b>Runs on Windows out of the box</b> (last30days ~30 broken issues); stdlib + threading, verified-green.</td></tr>
+      <tr><td id="r19">R19</td><td><b>Clean security posture</b> (last30days #565 High-Risk blocks clients): least-privilege + transparent "what it does / sends where".</td></tr>
+      <tr><td id="r20">R20</td><td><b>Install doesn't fail</b> — passes <code>claude plugin validate</code>, correct <code>skills/&lt;name&gt;/SKILL.md</code> layout.</td></tr>
+      <tr><td id="r21">R21</td><td><b>Smarter ranking than vote-count-only</b> (last30days #641): comment-evidence + relevance floor + anti-bot.</td></tr>
     </tbody>
   </table>
 
   <h3>Scope boundaries</h3>
   <div class="cols">
-    <div class="scope in"><b>In scope (v1)</b>
-      <ul><li>Full conversational wizard (R1–R5)</li><li>All tiers 0→1→OpenRouter→Telegram→TikTok/IG (R6–R12)</li><li>Demand-signal buttons + recording (R13–R15)</li><li>Two deployment profiles (R16–R17)</li><li>Differentiation fixes vs last30days (R18–R21)</li></ul>
-    </div>
-    <div class="scope out"><b>Out of scope / Non-goals (v1)</b>
-      <ul><li>Actual managed hosting backend — only the <em>signal</em> button, not the hosting</li><li>Real payment/billing flow</li><li>Non-coder GUI/dashboard wrapper — stays a developer-installable skill (the 2nd competitive gap; a later bet)</li><li>LinkedIn connector</li><li>Fulfilling done-for-you delivery in-product (that's Nik's consulting, off-tool)</li></ul>
-    </div>
+    <div class="scope in"><b>In scope (v1)</b><ul><li>Full conversational wizard (R1–R5)</li><li>All tiers (R6–R12)</li><li>Demand signals + recording (R13–R15)</li><li>Two profiles (R16–R17)</li><li>Differentiation fixes (R18–R21)</li></ul></div>
+    <div class="scope out"><b>Non-goals / Deferred to Follow-Up</b><ul><li>Actual managed hosting backend — signal button only</li><li>Real payment/billing</li><li>Non-coder GUI/dashboard wrapper</li><li>LinkedIn connector</li><li>In-product done-for-you fulfillment (Nik's consulting, off-tool)</li></ul></div>
   </div>
+</section>
 
-  <h3>Success criteria / acceptance signals</h3>
-  <ul>
-    <li>A client goes from install → first real $0 report <b>without entering any key</b>.</li>
-    <li>Each tier unlocks behind <b>one explicit decision</b>; a zero-risk user can stop at Tier 0 and still get real value.</li>
-    <li><b>Windows run green</b>; <code>claude plugin validate</code> passes; security scan is not High-Risk.</li>
-    <li>Demand signals are captured — Nik can see who pressed "want paid" / "host it for me".</li>
-    <li>Telegram onboarding never proceeds without the separate-account warning acknowledged.</li>
-  </ul>
+<section id="planning-contract">
+  <h2>Planning Contract — Key Technical Decisions</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Decision & rationale</th></tr></thead>
+    <tbody>
+      <tr><td id="ktd1">KTD1</td><td><b>Wizard = SKILL.md conversation + SessionStart hook, not a binary.</b> Unlike PostHog's <code>npx</code> agent, we're already inside the agent. The hook emits detected-state JSON to stdout (surfaced to the agent as context); the SKILL.md drives steps via <code>AskUserQuestion</code> with a prose fallback. Cheaper, no install step, host-portable.</td></tr>
+      <tr><td id="ktd2">KTD2</td><td><b>OpenRouter via raw HTTP with explicit provider-native tools</b> (<code>googleSearch</code> for Gemini, <code>x_search</code> for Grok, Sonar models for Perplexity) — NOT the <code>:online</code> shortcut (forces search every call, dumber+pricier). Our existing raw-<code>urllib</code> channels are the safe path (wrapper libs have grounding bugs). One <code>OPENROUTER_API_KEY</code> selects OpenRouter base-URL + per-provider tool schema; direct keys remain the independent-blast-radius alternative.</td></tr>
+      <tr><td id="ktd3">KTD3</td><td><b>Demand signal → append-only JSONL locally + optional notify to Nik's Telegram</b>; explicit opt-in, never auto-mint (last30days #524). v1 records the press + timestamp + which tier context; "just host it" additionally confirms to the user that Nik was notified. No payment, no hosting.</td></tr>
+      <tr><td id="ktd4">KTD4</td><td><b>Telegram via Telethon on a client-supplied session</b> from a <b>separate/secondary account</b>. A hard warning gate (must be acknowledged) precedes any session capture; the wizard never proceeds without it. Parsing is read-only; channel discovery uses <code>getChannelRecommendations</code> (subscriber-overlap) + forward-graph (from ideation).</td></tr>
+      <tr><td id="ktd5">KTD5</td><td><b>Media backend = pluggable interface</b> chosen by <code>DEEP_RESEARCH_PROFILE</code>. <em>client</em> (default): cloud — Groq Whisper ($0.04/hr) + Gemini Flash vision (sub-cent). <em>self</em>: local MLX Whisper + Gemma-3 vision ($0, Mac-bound). Connectors return bytes+metadata; the adapter transcribes.</td></tr>
+      <tr><td id="ktd6">KTD6</td><td><b>New sources extend the existing registry pattern</b> (<code>Connector(name, kind, fn, desc, requires)</code> + <code>channel_*</code> + <code>OUTPUT_NAMES</code>), not a rewrite. Keys reuse <code>read_key()</code>/<code>KEYS</code> with <code>DEEP_RESEARCH_SECRETS_DIR</code>; <code>scrapecreators</code>/<code>brave</code> key hooks already exist. Graceful <code>ERROR.md</code> degrade is inherited.</td></tr>
+    </tbody>
+  </table>
+</section>
 
-  <h3>Outstanding questions (for ce-plan / implementation)</h3>
-  <ul>
-    <li>Where does the demand signal land — a local log, a message to Nik's Telegram, a file, a lightweight endpoint? (Product: it's recorded; the destination is a plan decision.)</li>
-    <li>Telegram handoff mechanics — how the client supplies a session safely (the separate-account flow).</li>
-    <li>Gemini structured-JSON-output vs search-grounding are mutually exclusive through OpenRouter — reconcile with our output format.</li>
-    <li>"Just host it for me" — exact v1 behavior after the press (likely: notify Nik + confirmation to user; no real hosting yet).</li>
-  </ul>
+<section id="htd">
+  <h2>High-Level Technical Design</h2>
+  <p>The wizard gates each tier behind one visible decision, always showing what's already unlocked free before pitching the next. Tier-0 proof runs before any key ask (R3). Demand signals are reachable from any tier.</p>
+  <div class="figure">
+    <svg viewBox="0 0 780 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Wizard flow: SessionStart detects keys, Tier-0 proof runs first, then progressive tier gates, with demand-signal buttons reachable throughout">
+      <style>.b{fill:var(--panel);stroke:var(--border)}.bf{fill:var(--in);stroke:var(--in-b)}.bp{fill:var(--out);stroke:var(--out-b)}.t{font:12px system-ui;fill:var(--fg);text-anchor:middle}.tb{font:600 12px system-ui;fill:var(--fg);text-anchor:middle}.e{stroke:var(--muted);stroke-width:1.5;fill:none;marker-end:url(#a)}.c{font:10px system-ui;fill:var(--muted);text-anchor:middle}</style>
+      <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker></defs>
+      <rect x="12" y="20" width="150" height="46" rx="8" class="b"/><text x="87" y="40" class="tb">SessionStart hook</text><text x="87" y="56" class="c">detects keys (R2)</text>
+      <rect x="200" y="20" width="150" height="46" rx="8" class="bf"/><text x="275" y="40" class="tb">Tier 0 — $0 proof</text><text x="275" y="56" class="c">real report, no keys (R3,R6)</text>
+      <rect x="388" y="20" width="150" height="46" rx="8" class="b"/><text x="463" y="40" class="tb">Tier 1 — direct keys</text><text x="463" y="56" class="c">Gemini/Grok (R7)</text>
+      <rect x="576" y="20" width="150" height="46" rx="8" class="b"/><text x="651" y="40" class="tb">Tier 2 — OpenRouter</text><text x="651" y="56" class="c">one key (R8)</text>
+      <path d="M162 43 L198 43" class="e"/><path d="M350 43 L386 43" class="e"/><path d="M538 43 L574 43" class="e"/>
+      <rect x="388" y="120" width="150" height="46" rx="8" class="b"/><text x="463" y="140" class="tb">Telegram (opt-in)</text><text x="463" y="156" class="c">⚠ separate account (R9)</text>
+      <rect x="576" y="120" width="150" height="46" rx="8" class="b"/><text x="651" y="140" class="tb">TikTok/IG</text><text x="651" y="156" class="c">pay-per-use (R10)</text>
+      <path d="M463 66 L463 118" class="e"/><path d="M651 66 L651 118" class="e"/>
+      <rect x="200" y="120" width="150" height="46" rx="8" class="b"/><text x="275" y="140" class="tb">Media adapter</text><text x="275" y="156" class="c">cloud/local by profile (R16)</text>
+      <path d="M275 66 L275 118" class="e"/>
+      <rect x="200" y="215" width="340" height="52" rx="8" class="bp"/><text x="370" y="238" class="tb">Demand signals — reachable from any tier</text><text x="370" y="256" class="c">"want paid" · "just host it" → JSONL + notify (R13–R15)</text>
+      <path d="M370 166 L370 213" class="e" style="stroke-dasharray:4 3"/>
+    </svg>
+  </div>
+</section>
 
-  <h3>Assumptions (verify in planning)</h3>
+<section id="output-structure">
+  <h2>Output Structure (new/changed files)</h2>
+  <div class="tree"><pre><code>skills/deep-research/
+├── SKILL.md                    # + wizard STEP flow, tier gates, Telegram warning
+├── hooks/
+│   └── hooks.json              # NEW — SessionStart → detect-state.py
+└── scripts/
+    ├── deep-research.py        # + connectors (telegram, tiktok_ig, meta_ads, github_issues),
+    │                           #   OpenRouter backend, demand-signal mode, --diagnose
+    ├── detect_state.py         # NEW — key/account detection, emits JSON (R2)
+    ├── media_backend.py        # NEW — pluggable transcription/vision (R16, KTD5)
+    ├── signals.py              # NEW — demand-signal JSONL + optional notify (R13-15)
+    ├── connectors/             # NEW dir — telegram.py, tiktok_ig.py, meta_ads.py
+    └── selftest.sh             # + Windows-safe, $0-path, wizard-dry-run, validate checks
+tests/
+├── test_detect_state.py       # NEW
+├── test_signals.py            # NEW
+├── test_media_backend.py      # NEW
+└── test_ranking.py            # NEW</code></pre></div>
+  <p class="note">Tree is a scope declaration, not a constraint — per-unit Files lists are authoritative. Connectors may stay inline in <code>deep-research.py</code> if a separate <code>connectors/</code> package proves heavier than the registry pattern warrants (implementer's call).</p>
+</section>
+
+<section id="implementation-units">
+  <h2>Implementation Units</h2>
+  <p class="note">Grouped in 3 phases. Phase A first (wizard + Tier-0 + demand = first wow and the demand sensor). U-IDs stable.</p>
+
+  <h3>Phase A — Wizard core, Tier-0 proof, demand sensor</h3>
+
+  <h4 id="u1">U1. SessionStart hook + state detection</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>On session start, detect which keys/accounts are present and surface that to the agent so the wizard asks only for what's missing.</dd>
+    <dt>Requirements</dt><dd>R2</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/hooks/hooks.json</code> (new), <code>skills/deep-research/scripts/detect_state.py</code> (new), <code>tests/test_detect_state.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Reuse <code>read_key()</code>/<code>KEYS</code> lookup order (env → <code>DEEP_RESEARCH_SECRETS_DIR</code> files → keychain if available). <code>detect_state.py</code> prints JSON: which of {gemini, grok, perplexity, openrouter, scrapecreators, telegram-session} are configured, plus profile. <code>hooks.json</code> registers it on SessionStart; stdout becomes agent context.</dd>
+    <dt>Patterns</dt><dd>Existing <code>read_key</code>/<code>KEYS</code> in <code>deep-research.py:95-138</code>; existing <code>--list-connectors</code> JSON shape.</dd>
+    <dt>Test scenarios</dt><dd>Happy: no keys → all false + profile=client. Env key present → that provider true. <code>DEEP_RESEARCH_SECRETS_DIR</code> override respected. Edge: malformed key file → treated absent, no crash. Windows: no POSIX-only calls (Covers R18 at unit level).</dd>
+    <dt>Verification</dt><dd><code>python3 detect_state.py</code> emits valid JSON on macOS + Windows; hook fires on session start.</dd>
+  </dl>
+
+  <h4 id="u2">U2. Wizard flow in SKILL.md (conversation-as-wizard)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Drive onboarding as dialogue: welcome-inside-first-question, $0 proof before any key ask, one visible decision per tier, verification step.</dd>
+    <dt>Requirements</dt><dd>R1, R3, R4, R5</dd>
+    <dt>Dependencies</dt><dd>U1</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/SKILL.md</code> (add STEP flow section)</dd>
+    <dt>Approach</dt><dd>Add a "Onboarding (first run)" section: STEP 0 read detected state (U1) → STEP 1 first <code>AskUserQuestion</code> with welcome embedded (Auto/Manual/Skip) → STEP 2 run Tier-0 <code>--only</code> free connectors, show brief → STEP 3 offer tier upgrades one at a time, showing what's already free → STEP 4 verification (a real segment) + <code>--diagnose</code>. Prose fallback block for non-modal hosts.</dd>
+    <dt>Execution note</dt><dd>Documentation/behavior unit — verify by a scripted dry-run of the wizard steps against the free path, not unit tests.</dd>
+    <dt>Patterns</dt><dd>last30days modal-vs-prose dual flow; #750 (welcome inside first question).</dd>
+    <dt>Test scenarios</dt><dd>Test expectation: none — SKILL.md prose. Verified via U-level dry-run in selftest (wizard-dry-run invokes the Tier-0 path and asserts a brief is produced with zero keys).</dd>
+    <dt>Verification</dt><dd>A no-key session reaches a real Tier-0 brief before any paid-key prompt appears.</dd>
+  </dl>
+
+  <h4 id="u3">U3. Demand-signal capture</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Record explicit "want paid" / "just host it" presses so Nik can measure willingness to pay; never auto-mint.</dd>
+    <dt>Requirements</dt><dd>R13, R14, R15</dd>
+    <dt>Dependencies</dt><dd>none (wired into wizard at U2)</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/signals.py</code> (new), <code>tests/test_signals.py</code> (new); <code>deep-research.py</code> add <code>--signal &lt;kind&gt;</code> mode</dd>
+    <dt>Approach</dt><dd>Append-only JSONL (<code>{ts, kind, tier_context, profile}</code>) under the run/project dir; optional notify to Nik's Telegram if a notify target is configured (KTD3). Kinds: <code>want-paid</code>, <code>host-for-me</code>. "host-for-me" returns a user-facing confirmation that Nik was notified. Explicit invocation only.</dd>
+    <dt>Patterns</dt><dd>Existing JSONL/manifest writing in <code>output_paths.py</code>; graceful degrade if notify target absent.</dd>
+    <dt>Test scenarios</dt><dd>Happy: <code>--signal want-paid</code> appends one JSONL line with timestamp+kind. host-for-me returns confirmation text. Edge: no notify target → still logs locally, no crash. Error: unwritable dir → surfaces error, doesn't lose the signal silently. No network call unless notify configured.</dd>
+    <dt>Verification</dt><dd>Both signal kinds append correctly; local log works with zero configuration.</dd>
+  </dl>
+
+  <h3>Phase B — Source tiers</h3>
+
+  <h4 id="u4">U4. OpenRouter backend (Tier 2)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>One <code>OPENROUTER_API_KEY</code> routes gemini/grok/perplexity lenses through OpenRouter with explicit native tools.</dd>
+    <dt>Requirements</dt><dd>R8</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/deep-research.py</code> (channel_gemini/grok/perplexity + base-URL routing), <code>tests/test_openrouter_routing.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Add <code>openrouter</code> key to <code>KEYS</code>. When present and a channel lacks its direct key, route via OpenRouter base-URL with the provider's <b>explicit native tool schema</b> (googleSearch / x_search / Sonar model id) over raw HTTP — never <code>:online</code>. Direct keys take precedence (independent blast-radius). Gemini JSON-output vs grounding exclusivity handled (prefer grounding, parse text).</dd>
+    <dt>Execution note</dt><dd>Smoke-test Perplexity-Sonar-via-OpenRouter reachability before relying (it has flip-flopped); record result.</dd>
+    <dt>Patterns</dt><dd>Existing <code>post_json</code>/raw-urllib channels; <code>OPENAI_BASE_URL</code> override pattern at <code>deep-research.py:136</code>.</dd>
+    <dt>Test scenarios</dt><dd>Happy: openrouter key set, no direct gemini key → channel builds OpenRouter request with native googleSearch tool (assert request shape, mocked). Direct key present → uses direct (precedence). Edge: neither key → channel skipped, recorded in manifest. Error: OpenRouter 5xx → ERROR.md, siblings continue. Assert no <code>:online</code> suffix ever emitted.</dd>
+    <dt>Verification</dt><dd>Request-shape tests pass; one live smoke-test per provider documented.</dd>
+  </dl>
+
+  <h4 id="u5">U5. GitHub issues + comments as first-class source</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Score GitHub issues + their comments as a research source (product/competitor intel), beyond repo search.</dd>
+    <dt>Requirements</dt><dd>R11</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>deep-research.py</code> (new <code>channel_github_issues</code> + registry + OUTPUT_NAMES), <code>tests/test_github_issues.py</code> (new)</dd>
+    <dt>Approach</dt><dd>New <code>github-issues</code> direct connector: given a repo or topic, pull top issues by reactions/comments + comment bodies (GitHub search+issues API via <code>gh</code> if present, else unauthenticated). Zero-config (Tier 0). Mirrors the teardown pattern already done manually this session.</dd>
+    <dt>Patterns</dt><dd>Existing <code>channel_github</code> (repo search) + <code>gh</code>-preferred/API-fallback shape.</dd>
+    <dt>Test scenarios</dt><dd>Happy: topic → issues ranked by reactions with comment excerpts. Edge: repo with 0 issues → honest empty. Error: rate-limited unauthenticated → ERROR.md degrade. Windows: no POSIX-only calls.</dd>
+    <dt>Verification</dt><dd>Returns issue+comment markdown for a known repo; degrades cleanly without <code>gh</code>.</dd>
+  </dl>
+
+  <h4 id="u6">U6. Telegram connector + separate-account warning</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Parse Telegram channels+comments (the moat) via a client-supplied Telethon session, gated behind a hard separate-account warning.</dd>
+    <dt>Requirements</dt><dd>R9</dd>
+    <dt>Dependencies</dt><dd>U2 (wizard gate)</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/connectors/telegram.py</code> (new), <code>deep-research.py</code> (register), SKILL.md (warning gate copy), <code>tests/test_telegram.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Optional dependency (Telethon); connector no-ops with a clear message if absent. Read-only channel/message/comment pull; channel discovery via <code>getChannelRecommendations</code> + forward-graph (ideation). Wizard STEP shows the hard warning (separate/secondary account, ban + personal-DM risk) and requires explicit acknowledgement before any session is used.</dd>
+    <dt>Execution note</dt><dd>Do not bundle Telethon as a hard dep (keeps Tier-0 install light + security posture clean, R19); import lazily.</dd>
+    <dt>Patterns</dt><dd>Existing direct-connector shape; ideation dual-edge-graph design (docs/ideation).</dd>
+    <dt>Test scenarios</dt><dd>Happy: with a mock session, returns channel posts+comments with reactions. Gate: connector refuses to run unless the acknowledgement flag is set. Edge: Telethon not installed → clear no-op message, not a crash. Error: auth failure → ERROR.md. No personal-account default anywhere.</dd>
+    <dt>Verification</dt><dd>Warning gate blocks unacknowledged runs; connector degrades cleanly without Telethon.</dd>
+  </dl>
+
+  <h4 id="u7">U7. TikTok / Instagram connector (pay-per-use)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Optional TikTok/IG source via a pay-per-use vendor for clients who don't want flaky OSS scrapers.</dd>
+    <dt>Requirements</dt><dd>R10</dd>
+    <dt>Dependencies</dt><dd>U9 (media adapter for transcripts) — soft; can ship metadata-only first</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/connectors/tiktok_ig.py</code> (new), <code>deep-research.py</code> (register), <code>tests/test_tiktok_ig.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Vendor adapter selectable by config: <code>scrapecreators</code> (key hook already exists) or Apify. Off by default. Pulls posts + comments + engagement; transcripts routed through the media adapter (U9) or the vendor's transcript endpoint. Honest cost note surfaced.</dd>
+    <dt>Patterns</dt><dd>Existing <code>scrapecreators</code>/<code>brave</code> key hooks in <code>KEYS</code>; direct-connector shape.</dd>
+    <dt>Test scenarios</dt><dd>Happy: vendor key set → posts+comments+engagement (mocked). Off by default: no key → skipped, recorded. Edge: vendor 402/quota → ERROR.md with cost hint. Assert not in the default connector set.</dd>
+    <dt>Verification</dt><dd>Runs only when explicitly enabled + keyed; default runs never touch it.</dd>
+  </dl>
+
+  <h3>Phase C — Profiles, ranking quality, differentiation hardening</h3>
+
+  <h4 id="u8">U8. Meta Ad Library connector (Tier-0 money signal)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Add free ad-spend intelligence (the "money is the reaction" tier from ideation) as a Tier-0 source.</dd>
+    <dt>Requirements</dt><dd>R6</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/connectors/meta_ads.py</code> (new), <code>deep-research.py</code> (register), <code>tests/test_meta_ads.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Meta Ad Library API (official, free ~200 calls/hr). Default EU scope (full commercial detail is EU-only under DSA; US is bucketed/political). Surfaces advertisers + sustained spend as a distinct source class.</dd>
+    <dt>Test scenarios</dt><dd>Happy: query → advertisers with spend buckets. Edge: US scope → honest "bucketed/political only" note. Error: needs App-Review token absent → clear guidance, degrade. Rate-limit → ERROR.md.</dd>
+    <dt>Verification</dt><dd>Returns ad data for an EU-scoped query; honest degradation without a token.</dd>
+  </dl>
+
+  <h4 id="u9">U9. Pluggable media backend (deployment profiles)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Transcription/vision as a profile-selected backend: cloud-cheap for clients, local $0 for self.</dd>
+    <dt>Requirements</dt><dd>R16, R17</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/media_backend.py</code> (new), <code>tests/test_media_backend.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Abstract <code>transcribe(bytes)</code> / <code>describe_image(bytes)</code>. <code>DEEP_RESEARCH_PROFILE=client</code> (default) → Groq Whisper + Gemini Flash vision (raw HTTP, own keys); <code>=self</code> → local MLX Whisper + Gemma-3 (lazy import, no-op with guidance if unavailable). Neither Anthropic nor OpenAI (R17).</dd>
+    <dt>Patterns</dt><dd>Existing raw-urllib <code>post_json</code>; KTD5.</dd>
+    <dt>Test scenarios</dt><dd>Happy: client profile → cloud request shape (mocked, asserts Groq/Gemini endpoints). self profile → local path attempted, clean guidance if MLX absent. Edge: unknown profile → defaults to client with a warning. Assert no OpenAI/Anthropic endpoints.</dd>
+    <dt>Verification</dt><dd>Both profiles resolve the right backend; request-shape tests pass.</dd>
+  </dl>
+
+  <h4 id="u10">U10. Ranking upgrade — comment-evidence + relevance floor</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Rank beyond raw vote-count: weight comment evidence, apply a relevance floor, penalize bot signatures — fixing last30days #641 on niche topics.</dd>
+    <dt>Requirements</dt><dd>R21</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>deep-research.py</code> (ranking helper used by direct connectors), <code>tests/test_ranking.py</code> (new)</dd>
+    <dt>Approach</dt><dd>A shared scoring function: relevance floor (topic token overlap must clear a threshold before engagement counts) + bounded engagement bonus + a "too clean" (like-heavy/comment-light) penalty. Applied in direct connectors' sort. Mirrors ideation idea #4.</dd>
+    <dt>Test scenarios</dt><dd>Happy: on-topic high-engagement ranks above off-topic viral. Floor: off-topic item with huge votes stays below on-topic. Bot signature: like-heavy/comment-light item penalized. Edge: all-low-relevance → returns best-effort with a note.</dd>
+    <dt>Verification</dt><dd>Off-topic viral no longer outranks on-topic on a niche fixture.</dd>
+  </dl>
+
+  <h4 id="u11">U11. Differentiation hardening — Windows, security, install, Arctic-Shift check</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Make the "why switch from last30days" claims true and verified: Windows-green, clean security, install passes validate; confirm the load-bearing Arctic-Shift score assumption.</dd>
+    <dt>Requirements</dt><dd>R18, R19, R20</dd>
+    <dt>Dependencies</dt><dd>U1–U10 (audits the whole surface)</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/selftest.sh</code> (extend), <code>CONFIGURATION.md</code> (security/transparency section), <code>README.md</code> (Windows + "what it sends where")</dd>
+    <dt>Approach</dt><dd>Audit for POSIX-only calls (no <code>signal.SIGALRM</code>/<code>os.killpg</code>; threading only) — R18. Add a "what it does / what it sends where / least-privilege" section — R19. Ensure <code>claude plugin validate</code> passes and layout is correct — R20. Verify Arctic-Shift API returns Reddit score fields (the load-bearing assumption); if absent, document the honest fallback in the Reddit connector.</dd>
+    <dt>Execution note</dt><dd>Config/packaging + verification unit — prefer runtime/smoke checks (a Windows CI matrix run, a live <code>validate</code>, a live Arctic-Shift probe) over unit coverage.</dd>
+    <dt>Test scenarios</dt><dd>Test expectation: mostly smoke. selftest greps for banned POSIX-only symbols; <code>claude plugin validate</code> exits 0; a live Arctic-Shift probe asserts score field present or records the documented fallback; secret-scan stays clean.</dd>
+    <dt>Verification</dt><dd>selftest green on macOS + a Windows run; validate passes; Arctic-Shift score question resolved in writing.</dd>
+  </dl>
+</section>
+
+<section id="verification-contract">
+  <h2>Verification Contract</h2>
   <ul>
-    <li>Arctic-Shift returns Reddit score fields (load-bearing for reaction-weighting; unconfirmed).</li>
-    <li>OpenRouter still exposes Perplexity Sonar (it has flip-flopped; smoke-test).</li>
-    <li>Clients are predominantly on Claude Code / compatible agent hosts (modal + prose fallback covers the rest).</li>
-    <li>YouTube-video multimodal grounding (Gemini ingesting a URL) is separate from googleSearch grounding — verify if depended on.</li>
+    <li><b>Unit tests</b> for U1,U3,U4,U5,U6,U7,U8,U9,U10 pass (<code>tests/</code>), including request-shape assertions for cloud/OpenRouter (mocked, no live spend).</li>
+    <li><b>selftest.sh</b> extended: <code>--list-connectors</code> shows new connectors; Tier-0 wizard dry-run produces a brief with zero keys; banned-POSIX grep clean; <code>claude plugin validate</code> exits 0; secret-scan clean; brief HTML self-contained.</li>
+    <li><b>Live smokes (documented, minimal spend):</b> one OpenRouter call per provider; Arctic-Shift score-field probe; Meta Ad Library EU query.</li>
+    <li><b>Cross-platform:</b> selftest green on macOS and on a Windows run (CI matrix or manual).</li>
+    <li><b>Budget invariant:</b> a default run makes no Anthropic/OpenAI API calls (assert connector set excludes <code>openai</code>).</li>
   </ul>
 </section>
 
-<footer class="composition-signal">Composed 2026-07-17 by ce-brainstorm · requirements-only · grounded in this session's competitive scan, last30days issue-teardown, OpenRouter + wizard fact-checks · scope confirmed: full wizard, all tiers</footer>
+<section id="definition-of-done">
+  <h2>Definition of Done</h2>
+  <ul>
+    <li>A no-key client session reaches a real Tier-0 report <b>before</b> any paid-key prompt (R3) — proven by the wizard dry-run.</li>
+    <li>Each tier unlocks behind one explicit decision; a zero-risk user stops at Tier 0 with real value.</li>
+    <li>Telegram never runs without the separate-account warning acknowledged (R9).</li>
+    <li>Demand signals (want-paid / host-for-me) recorded locally with zero config; optional notify works when configured (R13–R15).</li>
+    <li>Windows selftest green; <code>claude plugin validate</code> passes; security section present; secret-scan clean (R18–R20).</li>
+    <li>Default run bills no Anthropic/OpenAI API (R17); OpenAI stays opt-in.</li>
+    <li>Ranking fixture shows on-topic beating off-topic-viral (R21).</li>
+    <li>Arctic-Shift score-field assumption confirmed or its fallback documented.</li>
+  </ul>
+</section>
+
+<footer class="composition-signal">Composed 2026-07-17 by ce-plan (enriched the ce-brainstorm Product Contract in place) · implementation-ready · grounded in this session's competitive scan, last30days teardown, OpenRouter + wizard fact-checks · scope: full wizard, all tiers, 3 phases</footer>
 
 <style>
   :root{--bg:#0f1216;--panel:#171c22;--fg:#dce3ea;--muted:#8a97a6;--accent:#5aa2ff;--border:#2a323b;--in:#12251a;--in-b:#3fae6e;--out:#25201a;--out-b:#d4913f}
@@ -133,28 +309,36 @@
   :root[data-theme="light"]{--bg:#fff;--panel:#f5f7fa;--fg:#1a2027;--muted:#5c6772;--border:#dfe4ea;--in:#e7f6ec;--in-b:#2f9e5f;--out:#fbf0e2;--out-b:#b9781f}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  section,footer{max-width:920px;margin:0 auto;padding:0 24px}
+  section,nav,footer{max-width:940px;margin:0 auto;padding:0 24px}
   .doc-header{padding-top:40px}
   .eyebrow{font:600 12px system-ui;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 4px}
   h1{font-size:1.9rem;line-height:1.2;margin:.1em 0 .5em}
   h2{font-size:1.35rem;margin:1.9em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--border)}
-  h3{font-size:1.12rem;margin:1.3em 0 .4em}
-  h4{font-size:.98rem;margin:1.4em 0 .3em;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-  p{max-width:74ch}
+  h3{font-size:1.14rem;margin:1.5em 0 .4em}
+  h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--accent)}
+  p{max-width:76ch}
   .meta{display:grid;grid-template-columns:max-content 1fr;gap:2px 16px;margin:12px 0;font-size:.9rem}
   .meta dt{color:var(--muted);font-weight:600}.meta dd{margin:0}
+  .preservation,.note{font-size:.86rem;color:var(--muted)}
+  .preservation{background:var(--panel);border-left:3px solid var(--in-b);border-radius:0 6px 6px 0;padding:8px 14px;max-width:76ch}
+  .jump{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin:18px auto;font-size:.9rem}
+  .jump a{color:var(--accent);text-decoration:none}.jump a:hover{text-decoration:underline}
   table{border-collapse:collapse;width:100%;margin:.6em 0;font-size:.92rem}
   th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
   th{background:var(--panel);font-weight:600}
-  td:first-child{font-weight:700;color:var(--accent);white-space:nowrap;width:3em}
-  code{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:.08em .38em;font:.85em ui-monospace,SFMono-Regular,Menlo,monospace}
-  ul{padding-left:1.2em}li{margin:.22em 0}
+  td:first-child{font-weight:700;color:var(--accent);white-space:nowrap;width:3.2em}
+  code{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:.06em .36em;font:.85em ui-monospace,SFMono-Regular,Menlo,monospace}
+  ul{padding-left:1.2em}li{margin:.24em 0}
   .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:.6em 0}
   @media (max-width:640px){.cols{grid-template-columns:1fr}}
   .scope{border-radius:10px;padding:12px 16px;border:1px solid var(--border)}
-  .scope.in{background:var(--in);border-color:var(--in-b)}
-  .scope.out{background:var(--out);border-color:var(--out-b)}
+  .scope.in{background:var(--in);border-color:var(--in-b)}.scope.out{background:var(--out);border-color:var(--out-b)}
   .scope b{display:block;margin-bottom:4px}
+  .figure{margin:14px 0;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto}
+  .figure svg{display:block;width:100%;height:auto;min-width:640px}
+  .tree pre{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px;overflow-x:auto;font:.84rem ui-monospace,Menlo,monospace}
+  .unit{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:.4em 0 1em;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 18px;font-size:.93rem}
+  .unit dt{color:var(--muted);font-weight:600;white-space:nowrap}.unit dd{margin:0}
   .composition-signal{color:var(--muted);font-size:.82rem;border-top:1px solid var(--border);margin-top:40px;padding:20px 24px 60px;text-align:center}
   a{color:var(--accent)}
 </style>
