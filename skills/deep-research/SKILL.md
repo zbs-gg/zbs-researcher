@@ -211,9 +211,19 @@ always naming what is already unlocked free first. Never stack questions.
 - **Telegram** (opt-in, HARD WARNING gate): separate/secondary account only,
   never the personal one; state the ban risk and the risk to personal DMs
   plainly; require explicit acknowledgement of both before any session
-  capture starts.
+  capture starts. The acknowledgement is machine-enforced: the connector
+  refuses to run until the environment carries
+  `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` (exact value). The Telethon
+  `*.session` file lives ONLY in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR`
+  or `~/.openclaw/secrets`; chmod 0600 on POSIX) — never inside the project
+  or research output tree. Telethon itself is an optional install
+  (`pip install telethon`); the connector is off by default — run it with
+  `--only telegram`.
 - **TikTok/IG**: pay-per-use vendor (ScrapeCreators), off by default; give an
-  honest per-run cost note before enabling.
+  honest per-run cost note before enabling. Vendor is selectable with
+  `DEEP_RESEARCH_TIKTOK_VENDOR` (`scrapecreators` default; `apify` needs
+  `APIFY_TOKEN`); run it with `--only tiktok-ig` — every run costs vendor
+  credits and the report header says so.
 - **Meta Ad Library**: free but token-gated — needs the user's own token.
 
 Each accepted tier ends with a verification step that proves it works: a real
@@ -315,6 +325,8 @@ A **complete skill-authored bundle** is self-contained:
 ├── bluesky.md            — top posts (or ERROR.md)
 ├── launch-radar.md       — what's shipping: momentum-ranked launches + category velocity
 ├── revenue-radar.md      — what's selling: Flippa sold prices + Substack bestseller tiers
+├── telegram.md           — Telegram channel posts + comments (opt-in, ack-gated)
+├── tiktok-ig.md          — TikTok/IG posts + comments (opt-in, pay-per-use)
 ├── synthesis.md          — session: overlaps, contradictions, recommendation
 └── brief.html            — optional shareable dark-mode HTML (self-contained)
 ```

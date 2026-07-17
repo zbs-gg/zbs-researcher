@@ -32,6 +32,11 @@ Two channel families run concurrently and write one markdown file each:
                   tiers (free; tiers rendered verbatim, never invented ARR)
     - meta-ads    who's PAYING to advertise: Meta Ad Library, EU scope
                   (free token required; auto-skipped without one)
+    - telegram    Telegram channel posts + comments via a Telethon client
+                  session (OPT-IN, hard-warning gate: separate account only;
+                  Telethon is an optional lazy import, never a hard dep)
+    - tiktok-ig   TikTok/IG posts + comments via a pay-per-use vendor
+                  (OPT-IN + key-gated; every run costs vendor credits)
 
 The deep-research skill owns the higher-level workflow: it reserves one
 project-local run with `--allocate-run`, writes `research-plan.md` before
@@ -105,6 +110,8 @@ import connectors as _market_radar_pkg
 from connectors.launch_radar import channel_launch_radar
 from connectors.meta_ads import channel_meta_ads
 from connectors.revenue_radar import channel_revenue_radar
+from connectors.telegram import channel_telegram
+from connectors.tiktok_ig import channel_tiktok_ig
 
 _market_radar_pkg.attach_runner(globals())
 
@@ -1015,6 +1022,13 @@ CONNECTORS = {
         Connector("launch-radar", "direct", channel_launch_radar, "what's shipping: Show HN + yc-oss + DevHunt (+PH with token)", []),
         Connector("revenue-radar", "direct", channel_revenue_radar, "what's selling: Flippa sold + Substack leaderboards (free)", []),
         Connector("meta-ads", "direct", channel_meta_ads, "who's paying to advertise: Meta Ad Library, EU scope (free token)", ["meta_ads"]),
+        # telegram is OFF by default (R9): it drives a real client session and
+        # is additionally gated at run time by DEEP_RESEARCH_TELEGRAM_ACK +
+        # a *.session file in the secrets dir. Opt in with --only telegram.
+        Connector("telegram", "direct", channel_telegram, "Telegram channels + comments via client session (opt-in, moat)", [], default=False),
+        # tiktok-ig is OFF by default AND key-gated (R10): pay-per-use vendor,
+        # every run costs credits. Opt in with --only tiktok-ig.
+        Connector("tiktok-ig", "direct", channel_tiktok_ig, "TikTok/IG posts+comments via pay-per-use vendor (opt-in)", ["scrapecreators"], default=False),
     ]
 }
 
@@ -1033,6 +1047,8 @@ OUTPUT_NAMES = {
     "launch-radar": "launch-radar.md",
     "revenue-radar": "revenue-radar.md",
     "meta-ads": "meta-ads.md",
+    "telegram": "telegram.md",
+    "tiktok-ig": "tiktok-ig.md",
 }
 
 
