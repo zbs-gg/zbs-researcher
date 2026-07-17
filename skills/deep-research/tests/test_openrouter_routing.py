@@ -56,6 +56,9 @@ def patched_keys(**overrides):
         "openai": "",
         "perplexity": "",
         "openrouter": "",
+        # not an LLM lens, but pinned so a host meta-ads token can't move a
+        # token-gated direct connector between live and skipped mid-test
+        "meta_ads": "",
     }
     values.update(overrides)
     return mock.patch.dict(deep_research.KEYS, values)
@@ -291,10 +294,12 @@ class OpenRouterAvailabilityTests(unittest.TestCase):
     def test_select_connectors_skips_llm_lenses_without_any_key(self):
         with patched_keys():
             live, skipped = deep_research.select_connectors(None, None)
-        skipped_names = {c.name for c in skipped}
-        self.assertEqual(skipped_names, {"gemini", "grok", "perplexity"})
-        for c in skipped:
-            self.assertTrue(c.missing_keys(), c.name)
+            # token-gated direct connectors (meta-ads) may be skipped too;
+            # this test pins the LLM-lens gating specifically
+            llm_skipped = {c.name for c in skipped if c.kind == "llm"}
+            self.assertEqual(llm_skipped, {"gemini", "grok", "perplexity"})
+            for c in skipped:
+                self.assertTrue(c.missing_keys(), c.name)
 
     def test_select_connectors_runs_llm_lenses_with_only_openrouter_key(self):
         with patched_keys(openrouter=OPENROUTER_KEY):
@@ -304,7 +309,10 @@ class OpenRouterAvailabilityTests(unittest.TestCase):
         self.assertIn("grok", live_names)
         self.assertIn("perplexity", live_names)
         self.assertNotIn("openai", live_names)  # not default, and R17
-        self.assertEqual(skipped, [])
+        # every LLM lens runs; only token-gated direct connectors (meta-ads,
+        # no token in patched_keys) may remain skipped
+        self.assertEqual([c.name for c in skipped if c.kind == "llm"], [])
+        self.assertEqual([c.name for c in skipped], ["meta-ads"])
 
     def test_list_connectors_reflects_openrouter_availability(self):
         buf = io.StringIO()

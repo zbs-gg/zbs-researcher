@@ -30,6 +30,8 @@ Two channel families run concurrently and write one markdown file each:
                   Hunt with a free read token) -> momentum + category velocity
     - revenue-radar  what's selling: Flippa sold prices + Substack bestseller
                   tiers (free; tiers rendered verbatim, never invented ARR)
+    - meta-ads    who's PAYING to advertise: Meta Ad Library, EU scope
+                  (free token required; auto-skipped without one)
 
 The deep-research skill owns the higher-level workflow: it reserves one
 project-local run with `--allocate-run`, writes `research-plan.md` before
@@ -101,6 +103,7 @@ from output_paths import (
 # module are honored inside the connector modules too.
 import connectors as _market_radar_pkg
 from connectors.launch_radar import channel_launch_radar
+from connectors.meta_ads import channel_meta_ads
 from connectors.revenue_radar import channel_revenue_radar
 
 _market_radar_pkg.attach_runner(globals())
@@ -157,6 +160,13 @@ KEYS = {
     # Optional paid video sources — only wired if a key shows up.
     "scrapecreators": read_key(["scrapecreators-key.txt"], r"[A-Za-z0-9_\-]{12,}", "SCRAPECREATORS_KEY"),
     "brave": read_key(["brave-key.txt"], r"[A-Za-z0-9_\-]{12,}", "BRAVE_API_KEY"),
+    # Media backend (R16): Groq Whisper transcription. Resolution contract
+    # mirrors detect_state.py / media_backend.py (same file, pattern, env).
+    "groq": read_key(["groq-key.txt"], r"gsk_[A-Za-z0-9_\-]+", "GROQ_API_KEY"),
+    # Meta Ad Library (R6): money-signal connector, token-gated — with
+    # requires=["meta_ads"] select_connectors auto-skips when absent and the
+    # manifest records the missing key (the honest degrade).
+    "meta_ads": read_key(["meta-ads-token.txt"], r"[A-Za-z0-9|]{20,}", "META_ADS_TOKEN"),
 }
 
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -1004,6 +1014,7 @@ CONNECTORS = {
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
         Connector("launch-radar", "direct", channel_launch_radar, "what's shipping: Show HN + yc-oss + DevHunt (+PH with token)", []),
         Connector("revenue-radar", "direct", channel_revenue_radar, "what's selling: Flippa sold + Substack leaderboards (free)", []),
+        Connector("meta-ads", "direct", channel_meta_ads, "who's paying to advertise: Meta Ad Library, EU scope (free token)", ["meta_ads"]),
     ]
 }
 
@@ -1021,6 +1032,7 @@ OUTPUT_NAMES = {
     "bluesky": "bluesky.md",
     "launch-radar": "launch-radar.md",
     "revenue-radar": "revenue-radar.md",
+    "meta-ads": "meta-ads.md",
 }
 
 
