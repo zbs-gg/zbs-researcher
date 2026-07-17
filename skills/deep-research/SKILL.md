@@ -47,7 +47,7 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 13 connectors run
+3. **Pick channels + aim each one.** Decide which of the 16 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -122,7 +122,7 @@ Nik's rule (2026-07-08): **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 13 connectors
+## Architecture — 16 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -134,8 +134,8 @@ live web access):
 | **perplexity** (Sonar) | web + news, citation-first | Web/social lens; forces per-claim attribution | on |
 | **openai** (gpt-5.4 non-Pro) | Reddit + HN + GitHub + blogs (`web_search`) | GPT lens; **bills OpenAI API** | **opt-in** |
 
-**Direct channels** (zero-config, free; STRUCTURAL signal an LLM won't hand
-you — raw numbers, odds, velocity):
+**Direct channels** (STRUCTURAL signal an LLM won't hand you — raw numbers,
+odds, velocity; free and zero-config except the last three gated ones):
 
 | Channel | Source | Gives you |
 |---|---|---|
@@ -148,6 +148,9 @@ you — raw numbers, odds, velocity):
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
 | **launch-radar** | Show HN + yc-oss + DevHunt (+Product Hunt with free read token) | what's shipping — momentum-ranked launches (votes × recency decay × comments) + category velocity (saturation signal); YC entries are recency-only (no vote fields) |
 | **revenue-radar** | Flippa sold listings + Substack leaderboards (free) | what's selling — realized sale prices with profit multiples (Flippa→microsaas) + bestseller tiers verbatim, never invented revenue (Substack→infoproducts) |
+| **meta-ads** | Meta Ad Library, EU scope (free token; auto-skipped without one) | who's PAYING to advertise the topic — active ads, advertisers, durations |
+| **telegram** *(opt-in, off by default)* | Telegram client session (Telethon; separate research account only, ack-gated) | channel posts + discussion comments — views, reactions, real subscriber voice |
+| **tiktok-ig** *(opt-in, off by default)* | pay-per-use vendor (ScrapeCreators or Apify) | TikTok/IG posts + comments — every run costs vendor credits, the report says so |
 
 **Claude (this session)** — synthesis: reads the report files, writes
 `synthesis.md` (overlaps, contradictions, one-screen recommendation), then

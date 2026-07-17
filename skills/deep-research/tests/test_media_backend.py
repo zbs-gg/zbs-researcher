@@ -48,7 +48,7 @@ finally:
         sys.path.remove(scripts_path)
 
 
-GROQ_KEY = "gsk_FakeMediaKey1234567890"
+GROQ_KEY = "gsk_FakeMediaKey123"  # short: stays under the selftest secret-scan floor
 GEMINI_KEY = "AIzaFakeVisionKey123"
 AUDIO = b"\xffRIFF-fake-audio-bytes"
 IMAGE = b"\x89PNG-fake-image-bytes"

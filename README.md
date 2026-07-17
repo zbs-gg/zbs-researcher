@@ -5,7 +5,7 @@ triangulates a topic across reasoning-model lenses **and** raw platform
 signal, then synthesizes the contradictions — not just the top-ranked
 summary.
 
-Unlike a single web search, it pulls in parallel from up to **11 connectors**
+Unlike a single web search, it pulls in parallel from up to **16 connectors**
 and, crucially, **produces a research plan before it runs** and **does not
 bill Anthropic or OpenAI APIs by default**.
 
@@ -37,11 +37,24 @@ bill Anthropic or OpenAI APIs by default**.
 | polymarket | direct | free | real-money odds (implied %) |
 | github | direct | free | repo stars, velocity |
 | github-issues | direct | free | top issues by reactions + comment excerpts |
-| reddit | direct | free* | top posts by upvotes *(best-effort)* |
+| reddit | direct | free* | top posts via Arctic-Shift archive — real score+comments *(best-effort)* |
 | bluesky | direct | free* | top posts *(best-effort)* |
+| launch-radar | direct | free (PH slice: free token) | what's shipping — Show HN + yc-oss + DevHunt momentum + category velocity |
+| revenue-radar | direct | free | what's selling — Flippa sold prices + Substack bestseller tiers |
+| meta-ads | direct | free Meta token | who's paying to advertise — Meta Ad Library (EU scope) |
+| telegram | direct | *(opt-in)* own Telegram app creds + session | channel posts + discussion comments — separate research account only |
+| tiktok-ig | direct | *(opt-in)* pay-per-use vendor key | TikTok/IG posts + comments — every run costs vendor credits |
 
-Direct channels are zero-config. LLM channels activate when their key is
+Free direct channels are zero-config; one OpenRouter key (Tier 2) can drive
+all three default LLM lenses at once. LLM channels activate when their key is
 present. See [CONFIGURATION.md](CONFIGURATION.md).
+
+A full **"what it sends where"** breakdown — per-connector endpoints, what
+data leaves the machine, and which credential (if any) each channel uses —
+is in [CONFIGURATION.md](CONFIGURATION.md#security--transparency--what-it-does-what-it-sends-where).
+The short version: connectors send your research query text to their public
+endpoints and nothing else; no Anthropic calls ever, no OpenAI calls unless
+you opt in.
 
 ## Install
 
@@ -134,7 +147,26 @@ outside the project intentionally.
 
 - Python 3.9+ (stdlib only — no pip install)
 - Optional: `gh` (GitHub CLI) for a higher-rate GitHub connector
+- Optional: `telethon` (pip) only if you enable the telegram connector
 - API keys only for the LLM channels you want (see CONFIGURATION.md)
+
+## Windows
+
+The Python runner is **Windows-native**: stdlib + `threading` only, no
+POSIX-only calls (`fcntl`, `pty`, `os.fork`, signal alarms, and friends are
+banned by the selftest; the one `os.chmod` is guarded behind an `os.name`
+check). Run it from PowerShell or cmd exactly as above:
+
+```powershell
+python skills\deep-research\scripts\deep-research.py --list-connectors
+```
+
+`scripts/selftest.sh` is a bash script — on Windows run it via **Git Bash**
+or **WSL**:
+
+```bash
+bash skills/deep-research/scripts/selftest.sh
+```
 
 ## License
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test — calls NO paid APIs. Verifies deterministic unit behavior,
-# packaged workflow/docs, metadata agreement, free direct connectors, and HTML.
+# packaged workflow/docs, metadata agreement, Windows portability, secret
+# hygiene, free direct connectors, HTML, the Tier-0 zero-key wizard path,
+# and (when the claude CLI is present) plugin manifest validity.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
@@ -9,11 +11,11 @@ OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 export PYTHONDONTWRITEBYTECODE=1
 
-echo "1/6 deterministic unit suite…"
+echo "1/10 deterministic unit suite…"
 python3 -m unittest discover \
     -s "$ROOT/skills/deep-research/tests" -p 'test_*.py'
 
-echo "2/6 project-local documentation contract…"
+echo "2/10 project-local documentation contract…"
 python3 - "$ROOT" <<'PY'
 import sys
 from pathlib import Path
@@ -119,7 +121,7 @@ runs=("$PROJECT"/research/deep-research-*)
 test "${#runs[@]}" -eq 1
 echo "   prepared plan-first handoff reused exactly one run"
 
-echo "3/6 plugin metadata agreement…"
+echo "3/10 plugin metadata agreement…"
 python3 - "$ROOT" <<'PY'
 import json
 import sys
@@ -144,20 +146,86 @@ for marker in ("ambiguous or malformed", "--only", "--skip", "blank explicit pat
 print(f"   plugin + marketplace = {expected}; changelog entry present")
 PY
 
-echo "4/6 connector list…"
+echo "4/10 Windows portability — banned POSIX-only symbols…"
+# Guarded os.chmod is allowed (telegram session 0600 behind an os.name
+# check); the symbols below have no Windows implementation and must never
+# appear anywhere in scripts/ (connectors/ included).
+if grep -rnE '\b(signal\.SIGALRM|os\.killpg|os\.setsid|fcntl|pty|termios|os\.fork)\b' \
+    --include='*.py' --exclude-dir=__pycache__ "$HERE"; then
+    echo "   FAIL: POSIX-only symbol found in scripts/ (breaks Windows)"; exit 1
+fi
+echo "   no POSIX-only symbols in scripts/ Python (guarded os.chmod allowed)"
+
+echo "5/10 secret scan — no key material in tracked source…"
+# Real key bodies are long runs of [A-Za-z0-9_-] right after the provider
+# prefix; the read_key() regex literals in source put a "[" there instead,
+# so they can never match. Any hit below is a leaked (or planted) key.
+if grep -rnE '(sk-or-|xai-|gsk_|pplx-)[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{30,}' \
+    --exclude-dir=__pycache__ \
+    "$ROOT/skills" "$ROOT/hooks" "$ROOT/.claude-plugin"; then
+    echo "   FAIL: key-material pattern found in tracked source"; exit 1
+fi
+echo "   no key-material patterns in skills/, hooks/, .claude-plugin/"
+
+echo "6/10 connector list…"
 python3 "$SCRIPT" --list-connectors | python3 -c "import sys,json; n=len(json.load(sys.stdin)['connectors']); print(f'   {n} connectors'); sys.exit(0 if n>=10 else 1)"
 
-echo "5/6 free channels (hackernews + hiring)…"
+echo "7/10 free channels (hackernews + hiring)…"
 RAW_OUT="$OUT/raw"
 python3 "$SCRIPT" "context engineering" --output-dir "$RAW_OUT" --only hackernews,hiring --max-items 3 >/dev/null 2>&1
 test -s "$RAW_OUT/hackernews.md" || { echo "   FAIL: hackernews.md empty"; exit 1; }
 test -s "$RAW_OUT/hiring.md"     || { echo "   FAIL: hiring.md empty"; exit 1; }
 echo "   hackernews.md + hiring.md non-empty"
 
-echo "6/6 HTML render…"
+echo "8/10 HTML render…"
 python3 "$SCRIPT" --render-html "$RAW_OUT/hackernews.md" --html-out "$OUT/brief.html" >/dev/null 2>&1
 test -s "$OUT/brief.html" || { echo "   FAIL: brief.html empty"; exit 1; }
 grep -qE 'src=|href="http[^"]*\.css|@import' "$OUT/brief.html" && { echo "   FAIL: brief.html not self-contained"; exit 1; }
 echo "   brief.html self-contained"
+
+echo "9/10 Tier-0 wizard dry-run (zero keys)…"
+# The scripted half of the onboarding wizard: a fresh install with NO keys
+# must still detect state honestly, pass the doctor offline, and produce a
+# real free-connector report + self-contained brief. Conversation ordering
+# (pitch-inside-question, proof-before-key-ask) is the manual checklist in
+# SKILL.md.
+WIZ_OUT="$OUT/tier0-run"
+WIZ_SECRETS="$OUT/tier0-secrets"
+mkdir -p "$WIZ_SECRETS"
+TIER0=(env -u GEMINI_API_KEY -u GROK_API_KEY -u OPENAI_API_KEY \
+    -u PERPLEXITY_API_KEY -u OPENROUTER_API_KEY -u GROQ_API_KEY \
+    -u SCRAPECREATORS_KEY -u BRAVE_API_KEY -u META_ADS_TOKEN \
+    -u PRODUCTHUNT_TOKEN -u APIFY_TOKEN -u TELEGRAM_API_ID -u TELEGRAM_API_HASH \
+    DEEP_RESEARCH_SECRETS_DIR="$WIZ_SECRETS")
+"${TIER0[@]}" python3 "$HERE/detect_state.py" | python3 -c '
+import json, sys
+state = json.load(sys.stdin)
+providers = state.get("providers")
+assert isinstance(providers, dict) and providers, f"bad providers: {providers!r}"
+on = [name for name, flag in providers.items() if flag is not False]
+assert not on, f"providers unexpectedly configured in isolated env: {on}"
+assert state.get("telegram_session") is False, "telegram_session must be false"
+assert state.get("wizard_done") is False, "wizard_done must be false"
+print("   detect_state: valid JSON, all providers false")
+'
+"${TIER0[@]}" python3 "$SCRIPT" --diagnose >/dev/null
+echo "   --diagnose exits 0 offline"
+"${TIER0[@]}" python3 "$SCRIPT" "context engineering" --output-dir "$WIZ_OUT" \
+    --only hackernews,hiring --max-items 3 >/dev/null 2>&1
+test -s "$WIZ_OUT/hackernews.md" || { echo "   FAIL: tier-0 hackernews.md empty"; exit 1; }
+test -s "$WIZ_OUT/hiring.md"     || { echo "   FAIL: tier-0 hiring.md empty"; exit 1; }
+"${TIER0[@]}" python3 "$SCRIPT" --render-html "$WIZ_OUT/hackernews.md" \
+    --html-out "$WIZ_OUT/brief.html" >/dev/null 2>&1
+test -s "$WIZ_OUT/brief.html" || { echo "   FAIL: tier-0 brief.html empty"; exit 1; }
+grep -qE 'src=|href="http[^"]*\.css|@import' "$WIZ_OUT/brief.html" \
+    && { echo "   FAIL: tier-0 brief.html not self-contained"; exit 1; }
+echo "   zero-key run produced a real report + self-contained brief"
+
+echo "10/10 claude plugin validate…"
+if command -v claude >/dev/null 2>&1; then
+    (cd "$ROOT" && claude plugin validate .)
+else
+    echo "   SKIP (claude CLI not found)"
+fi
 
 echo "OK — selftest passed (no paid APIs called)"

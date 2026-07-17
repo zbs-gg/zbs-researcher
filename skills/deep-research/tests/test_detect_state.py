@@ -134,7 +134,7 @@ class DetectStateTests(unittest.TestCase):
 
     def test_cli_emits_valid_json_without_key_material(self):
         env_secret = "AIzaSuperSecretDoNotPrint987"
-        file_secret = "xai-FileSecretDoNotPrint654"
+        file_secret = "xai-FileSecretNoPrint7"  # short: under the selftest secret-scan floor
         with tempfile.TemporaryDirectory() as tmp:
             secrets = Path(tmp).resolve()
             (secrets / "grok-api-key.txt").write_text(file_secret + "\n", encoding="utf-8")
