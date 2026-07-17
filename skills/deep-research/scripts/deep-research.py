@@ -814,6 +814,11 @@ def main():
         action="store_true",
         help="reserve a project-local run directory, print it, and exit",
     )
+    modes.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="print an offline doctor report (providers, profile, onboarding state)",
+    )
     ap.add_argument("--html-out", metavar="HTML", help="output path for --render-html")
     # legacy aliases
     ap.add_argument("--gemini-q")
@@ -832,6 +837,18 @@ def main():
 
     if args.list_connectors:
         list_connectors_json()
+        return
+
+    if args.diagnose:
+        # Sibling module (no hyphen, so a plain import works when this file
+        # runs as a script and scripts/ is sys.path[0]); fall back to an
+        # explicit path insert for importlib-loaded copies of this module.
+        try:
+            import detect_state
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import detect_state
+        print(detect_state.doctor_report())
         return
 
     if args.render_html:

@@ -9,6 +9,7 @@
   "homepage": "https://github.com/nkkmnk/deep-research-skill",
   "repository": "https://github.com/nkkmnk/deep-research-skill",
   "license": "MIT",
+  "hooks": "./hooks/hooks.json",
   "keywords": [
     "research",
     "deep-research",
