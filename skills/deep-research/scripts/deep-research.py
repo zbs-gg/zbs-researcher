@@ -11,6 +11,10 @@ Two channel families run concurrently and write one markdown file each:
     - openai      gpt-5.4 (NON-Pro) + web_search -> Reddit / HN / GitHub / blogs
     - perplexity  Sonar online -> web + news, citation-first
 
+  Tier 2 (R8): one OPENROUTER_API_KEY (or ~/.openclaw/secrets/openrouter-key.txt)
+  drives gemini/grok/perplexity through OpenRouter when their direct keys are
+  absent; direct keys always win. openai is NOT OpenRouter-routed (R17).
+
   Direct channels (zero-config, free; give STRUCTURAL signal an LLM
   won't hand you — raw numbers, odds, velocity):
     - hackernews  HN Algolia -> stories ranked by points/comments
@@ -88,7 +92,8 @@ from output_paths import (
 # Where per-provider key files live. Defaults to ~/.openclaw/secrets (the
 # author's setup) but is overridable so anyone can point it elsewhere — or
 # skip files entirely and use env vars (GEMINI_API_KEY, GROK_API_KEY,
-# OPENAI_API_KEY, PERPLEXITY_API_KEY), which read_key() falls back to.
+# OPENAI_API_KEY, PERPLEXITY_API_KEY, OPENROUTER_API_KEY), which read_key()
+# falls back to.
 SECRETS = Path(os.environ.get("DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / ".openclaw" / "secrets"))).expanduser()
 UA = "deep-research/2.0 (+https://github.com/nkkmnk/deep-research-skill)"
 
@@ -129,6 +134,10 @@ KEYS = {
         r"pplx-[A-Za-z0-9_\-]+",
         "PERPLEXITY_API_KEY",
     ),
+    # Tier 2 (R8): ONE OpenRouter key covers the gemini/grok/perplexity lenses
+    # when their direct keys are absent. Resolution contract mirrors
+    # detect_state.py exactly (same file name, pattern, env var).
+    "openrouter": read_key(["openrouter-key.txt"], r"sk-or-[A-Za-z0-9_\-]+", "OPENROUTER_API_KEY"),
     # Optional paid video sources — only wired if a key shows up.
     "scrapecreators": read_key(["scrapecreators-key.txt"], r"[A-Za-z0-9_\-]{12,}", "SCRAPECREATORS_KEY"),
     "brave": read_key(["brave-key.txt"], r"[A-Za-z0-9_\-]{12,}", "BRAVE_API_KEY"),
@@ -172,26 +181,152 @@ def _extract_responses_text(data):
 
 # ---------------------------------------------------------------------------
 # LLM channels
+#
+# Each lens has two paths:
+#   1. direct — the provider's own API with its own key (always preferred:
+#      independent blast radius, provider-native response shape);
+#   2. Tier 2 (R8) — no direct key but KEYS["openrouter"] present: the same
+#      lens through OpenRouter's chat/completions with the provider's explicit
+#      native grounding tool. NEVER the ":online" model suffix — that swaps in
+#      OpenRouter's generic web plugin instead of provider-native retrieval.
+# openai has NO Tier-2 path on purpose (R17: opt-in, direct key only).
 # ---------------------------------------------------------------------------
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Model ids are literal constants on purpose: no suffix machinery exists, so a
+# ":online" model can never be built (guarded by tests too).
+OPENROUTER_MODELS = {
+    "gemini": "google/gemini-2.5-pro",
+    "grok": "x-ai/grok-4",
+    "perplexity": "perplexity/sonar",
+}
+
+
+# Prompt text is shared between the direct and Tier-2 paths so a lens asks the
+# same question no matter how it is routed.
+def _gemini_prompt(query):
+    return (
+        "Search the web (especially YouTube) for the topic below. "
+        "Find recent (2025-2026) videos / talks / tutorials. "
+        "For each finding: title, channel/author, url, key claim "
+        "(2-3 sentences). Flag contradictions with other sources. "
+        "Conclude with a 5-7 line summary of recurring themes.\n\n"
+        f"TOPIC: {query}"
+    )
+
+
+_GROK_SYSTEM = (
+    "You search X / Twitter for honest user voice on technical topics. "
+    "Quote actual posts when available. Note dates. Surface contradictions."
+)
+
+
+def _grok_user(query):
+    return (
+        f"Search X for posts (2025-2026) about: {query}\n\n"
+        "Return: 1) 5-15 representative quotes (verbatim if possible) with "
+        "author handle and date, 2) recurring complaints, 3) workarounds "
+        "people share, 4) overall sentiment."
+    )
+
+
+_PERPLEXITY_SYSTEM = (
+    "You are a citation-first research assistant. Answer with concrete, "
+    "recent (2025-2026) findings and always attribute claims to sources. "
+    "Surface disagreements between sources rather than smoothing them over."
+)
+
+
+def _perplexity_user(query):
+    return (
+        f"Research this topic and report key findings with dates and sources, "
+        f"noting any contradictions: {query}"
+    )
+
+
+def openrouter_request_body(provider, query):
+    """Build the OpenRouter chat/completions request body for one LLM lens.
+
+    Pure function (no network) so tests pin the exact request shape. Grounding
+    is provider-native and explicit — NEVER the ":online" model suffix.
+    """
+    if provider == "gemini":
+        # KTD2: googleSearch is passed through in the provider-native schema
+        # (OpenRouter forwards provider-specific fields). This passthrough is
+        # NOT live-verified yet — the U4 smoke must confirm grounding evidence
+        # (real search-backed citations in the response) before Tier 2 is
+        # advertised for the gemini lens. Fallback if the smoke fails:
+        # Tier 2 = Sonar-only; gemini stays direct-key.
+        return {
+            "model": OPENROUTER_MODELS["gemini"],
+            "messages": [{"role": "user", "content": _gemini_prompt(query)}],
+            "tools": [{"googleSearch": {}}],
+        }
+    if provider == "grok":
+        # KTD2: same caveat as gemini — the x_search passthrough needs smoke
+        # confirmation before Tier 2 is advertised for the grok lens.
+        return {
+            "model": OPENROUTER_MODELS["grok"],
+            "messages": [
+                {"role": "system", "content": _GROK_SYSTEM},
+                {"role": "user", "content": _grok_user(query)},
+            ],
+            "tools": [{"type": "x_search"}],
+        }
+    if provider == "perplexity":
+        # Sonar is grounded by construction — the model id IS the retrieval.
+        # No tool field needed, so this lens is the safe Tier-2 baseline.
+        return {
+            "model": OPENROUTER_MODELS["perplexity"],
+            "messages": [
+                {"role": "system", "content": _PERPLEXITY_SYSTEM},
+                {"role": "user", "content": _perplexity_user(query)},
+            ],
+            "max_tokens": 4000,
+            "temperature": 0.3,
+        }
+    # openai (and anything else) is deliberately unrouted — R17.
+    raise ValueError(f"no OpenRouter route for provider: {provider}")
+
+
+def _channel_via_openrouter(provider, query, out_path):
+    """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
+    OpenAI chat/completions shape, append citations/annotations if present.
+    Errors propagate so run_connector writes <name>.ERROR.md."""
+    body = openrouter_request_body(provider, query)
+    data = post_json(
+        OPENROUTER_URL,
+        body,
+        {"Authorization": f"Bearer {KEYS['openrouter']}"},
+        timeout=600,
+    )
+    message, text = {}, ""
+    try:
+        message = data["choices"][0]["message"] or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content.strip()
+    except (KeyError, IndexError, TypeError):
+        message = {}
+    if not text:
+        text = json.dumps(data, indent=2)[:5000]
+    links = [c for c in (data.get("citations") or [])[:40] if isinstance(c, str)]
+    for a in (message.get("annotations") or [])[:40]:
+        u = a.get("url_citation") if isinstance(a, dict) else None
+        if isinstance(u, dict) and u.get("url"):
+            links.append(f"[{u.get('title') or u['url']}]({u['url']})")
+    if links:
+        text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
+    out_path.write_text(text)
+    return len(text)
+
+
 def channel_gemini(query, out_path, max_items):
+    if not KEYS["gemini"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("gemini", query, out_path)
     body = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "Search the web (especially YouTube) for the topic below. "
-                            "Find recent (2025-2026) videos / talks / tutorials. "
-                            "For each finding: title, channel/author, url, key claim "
-                            "(2-3 sentences). Flag contradictions with other sources. "
-                            "Conclude with a 5-7 line summary of recurring themes.\n\n"
-                            f"TOPIC: {query}"
-                        )
-                    }
-                ],
-            }
-        ],
+        "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
         "generationConfig": {"maxOutputTokens": 8000, "temperature": 0.4},
     }
@@ -216,25 +351,14 @@ def channel_gemini(query, out_path, max_items):
 
 
 def channel_grok(query, out_path, max_items):
+    if not KEYS["grok"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("grok", query, out_path)
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
-            {
-                "role": "system",
-                "content": (
-                    "You search X / Twitter for honest user voice on technical topics. "
-                    "Quote actual posts when available. Note dates. Surface contradictions."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Search X for posts (2025-2026) about: {query}\n\n"
-                    "Return: 1) 5-15 representative quotes (verbatim if possible) with "
-                    "author handle and date, 2) recurring complaints, 3) workarounds "
-                    "people share, 4) overall sentiment."
-                ),
-            },
+            {"role": "system", "content": _GROK_SYSTEM},
+            {"role": "user", "content": _grok_user(query)},
         ],
         "tools": [{"type": "x_search"}],
     }
@@ -286,24 +410,14 @@ def channel_openai(query, out_path, max_items):
 
 
 def channel_perplexity(query, out_path, max_items):
+    if not KEYS["perplexity"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("perplexity", query, out_path)
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a citation-first research assistant. Answer with concrete, "
-                    "recent (2025-2026) findings and always attribute claims to sources. "
-                    "Surface disagreements between sources rather than smoothing them over."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Research this topic and report key findings with dates and sources, "
-                    f"noting any contradictions: {query}"
-                ),
-            },
+            {"role": "system", "content": _PERPLEXITY_SYSTEM},
+            {"role": "user", "content": _perplexity_user(query)},
         ],
         "max_tokens": 4000,
         "temperature": 0.3,
@@ -738,16 +852,22 @@ def channel_bluesky(query, out_path, max_items):
 # Connector registry
 # ---------------------------------------------------------------------------
 class Connector:
-    def __init__(self, name, kind, fn, source, requires=(), default=True):
+    def __init__(self, name, kind, fn, source, requires=(), default=True, fallback_key=None):
         self.name = name
         self.kind = kind  # 'llm' | 'direct'
         self.fn = fn
         self.source = source
         self.requires = list(requires)
         self.default = default
+        # Tier 2 (R8): a key that satisfies `requires` when the direct key is
+        # absent (the channel itself still prefers the direct key).
+        self.fallback_key = fallback_key
 
     def missing_keys(self):
-        return [k for k in self.requires if not KEYS.get(k)]
+        missing = [k for k in self.requires if not KEYS.get(k)]
+        if missing and self.fallback_key and KEYS.get(self.fallback_key):
+            return []
+        return missing
 
     def available(self):
         return not self.missing_keys()
@@ -756,13 +876,14 @@ class Connector:
 CONNECTORS = {
     c.name: c
     for c in [
-        Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"]),
-        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"]),
+        Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"], fallback_key="openrouter"),
+        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"], fallback_key="openrouter"),
         # openai is OFF by default: it bills the OpenAI API per token. Web/social
         # is covered by gemini+grok+perplexity (not OpenAI/Anthropic) + direct
         # channels. Opt in explicitly with --only openai when you want a GPT lens.
+        # NO OpenRouter fallback here either — openai stays direct-key only (R17).
         Connector("openai", "llm", channel_openai, "Reddit/HN/GitHub/blogs (gpt-5.4 web_search) — OPT-IN, bills OpenAI API", ["openai"], default=False),
-        Connector("perplexity", "llm", channel_perplexity, "web + news, citation-first (Sonar)", ["perplexity"]),
+        Connector("perplexity", "llm", channel_perplexity, "web + news, citation-first (Sonar)", ["perplexity"], fallback_key="openrouter"),
         Connector("hackernews", "direct", channel_hackernews, "HN Algolia — points/comments", []),
         Connector("hiring", "direct", channel_hiring, "HN Who-is-hiring — job-market hotness for a topic", []),
         Connector("polymarket", "direct", channel_polymarket, "real-money prediction odds", []),
@@ -983,17 +1104,18 @@ def render_html(md_path, html_path):
 def list_connectors_json():
     rows = []
     for c in CONNECTORS.values():
-        rows.append(
-            {
-                "name": c.name,
-                "kind": c.kind,
-                "source": c.source,
-                "default": c.default,
-                "available": c.available(),
-                "requires": c.requires,
-                "missing_keys": c.missing_keys(),
-            }
-        )
+        row = {
+            "name": c.name,
+            "kind": c.kind,
+            "source": c.source,
+            "default": c.default,
+            "available": c.available(),
+            "requires": c.requires,
+            "missing_keys": c.missing_keys(),
+        }
+        if c.fallback_key:
+            row["fallback_key"] = c.fallback_key
+        rows.append(row)
     print(json.dumps({"connectors": rows}, indent=2))
 
 
