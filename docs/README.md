@@ -12,7 +12,9 @@ reached, an example run, and the working chat.
   - **`_workings/`** — the raw ideation trail: `grounding.md` (consolidated research digests + constraints + axes), `raw-candidates.md` (16 merged candidates), `survivors.md` (arbitration notes).
 - **`plans/`** — plan-first design docs (deep-research rewrite, plugin packaging, project-local output).
 - **`examples/ai-memory-run/`** — a real deep-research run on "State of AI Memory, July 2026": every channel report + `manifest.json` + `synthesis.md` + `brief.html`. Shows what the plugin actually produces.
-- **`chat/`** — `session-2026-07-transcript.md`, the working Nikita ↔ Эли dialogue that produced all of the above (tool calls collapsed to one line each).
+- **`chat/`** — `session-2026-07-transcript.md`, the clean Nikita ↔ Эли dialogue (questions + answers only, no reasoning/code) that produced everything here.
+- **`competitive/`** — the market landscape: `2026-07-competitive-landscape.md` (4-segment scan), `last30days-issues-teardown.md` (7 differentiation points + the #532 money signal), `positioning.md` (wedge + monetization), `launch-market-radar-sources.md` (product-launch + revenue sources for the market-radar layer).
+- **`research/`** — build-reference fact-checks: `access-and-pricing.md` (Reddit/vendors/cloud/OpenRouter access + prices), `wizard-onboarding-patterns.md` (PostHog/Sentry + Claude-skill hooks), `telegram-and-missed-sources.md` (channel graph + money sources). Verify live before building — several are snippet-sourced.
 
 ## Key design decisions captured here
 
