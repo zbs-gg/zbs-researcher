@@ -17,8 +17,8 @@ Two channel families run concurrently and write one markdown file each:
     - hiring      HN "Who is hiring?" -> topic mentions and sample companies
     - polymarket  Gamma markets -> real-money odds on the topic
     - github      repo search -> stars, recent activity, top issues
-    - reddit      search.json -> top posts by upvotes (best-effort; Reddit
-                  throttles unauthenticated JSON, degrades to ERROR.md)
+    - reddit      Arctic-Shift archive -> reaction-weighted posts (real
+                  score+comments; reddit.com/search.json is dead)
     - bluesky     app.bsky searchPosts (best-effort)
 
 The deep-research skill owns the higher-level workflow: it reserves one
@@ -64,6 +64,7 @@ Usage:
 import argparse
 import html as html_mod
 import json
+import math
 import os
 import re
 import shutil
@@ -326,19 +327,126 @@ def channel_perplexity(query, out_path, max_items):
 
 
 # ---------------------------------------------------------------------------
+# Ranking (R21): comment-evidence + relevance floor
+#
+# Raw vote-count ranking lets an off-topic viral item bury on-topic results
+# for niche topics. The shared helper below fixes that with three rules:
+#   1. relevance floor — an item must match enough distinctive topic tokens
+#      before engagement counts at all; below-floor items rank strictly
+#      below every above-floor item regardless of votes;
+#   2. bounded engagement — log-scale, so 10k votes can't dominate purely
+#      on votes;
+#   3. "too clean" penalty — like-heavy/comment-light items (a common bot
+#      signature) are penalized when comment data is available.
+# Pure functions, no network: connectors fetch a pool and rank it here.
+# ---------------------------------------------------------------------------
+_RANK_STOPWORDS = frozenset(
+    "a an and are as at be but by can do for from has have how i if in is it its "
+    "my of on or our so that the their there these they this to was we what when "
+    "where which who why will with you your".split()
+)
+RELEVANCE_FLOOR = 0.34  # fraction of distinctive topic tokens that must appear
+
+
+def _rank_tokens(text):
+    """Lowercase word tokens minus stopwords (stopword-light, not a full NLP
+    pass — enough to make 'context engineering' distinctive)."""
+    words = re.findall(r"[a-z0-9][a-z0-9+#.\-]*", (text or "").lower())
+    return [w for w in words if w not in _RANK_STOPWORDS and len(w) >= 2]
+
+
+def relevance_score(text, topic):
+    """0..1: fraction of the topic's distinctive tokens present in text.
+    A topic with no distinctive tokens gates nothing (returns 1.0)."""
+    topic_tokens = set(_rank_tokens(topic))
+    if not topic_tokens:
+        return 1.0
+    text_tokens = set(_rank_tokens(text))
+    return len(topic_tokens & text_tokens) / len(topic_tokens)
+
+
+def engagement_score(votes, comments=None):
+    """Bounded (log10) engagement. Comments count as corroborating evidence;
+    a high-vote / near-zero-comment signature gets halved (bot smell).
+    `comments=None` means "no comment data" — no bonus, no penalty."""
+    votes = max(float(votes or 0), 0.0)
+    score = math.log10(1.0 + votes)
+    if comments is not None:
+        comments = max(float(comments or 0), 0.0)
+        score += 0.5 * math.log10(1.0 + comments)
+        if votes >= 50 and comments <= max(1.0, votes / 200.0):
+            score *= 0.5
+    return score
+
+
+class RankResult:
+    """Ranked items plus an optional degrade note the caller can surface."""
+
+    __slots__ = ("items", "note")
+
+    def __init__(self, items, note=None):
+        self.items = items
+        self.note = note
+
+
+def rank_items(items, topic, *, text_key, engagement_key, comments_key=None,
+               max_items=None):
+    """Order dict items by (relevance floor, then engagement+relevance).
+
+    Deterministic and stable: pure function of the input; exact ties keep
+    input order. When NO item clears the relevance floor the order is
+    best-effort (relevance, then engagement) and `note` explains that.
+    """
+    scored = []
+    for it in items:
+        rel = relevance_score(str(it.get(text_key) or ""), topic)
+        comments = it.get(comments_key) if comments_key else None
+        eng = engagement_score(it.get(engagement_key), comments)
+        tier = 0 if rel >= RELEVANCE_FLOOR else 1
+        scored.append((tier, -(eng + 1.5 * rel), -rel, it))
+    scored.sort(key=lambda row: row[:3])  # stable: ties keep input order
+    ranked = [row[3] for row in scored]
+    note = None
+    if ranked and all(row[0] == 1 for row in scored):
+        note = (
+            "no result cleared the topic-relevance floor; "
+            "order is best-effort (may be off-topic)"
+        )
+    if max_items is not None:
+        ranked = ranked[:max_items]
+    return RankResult(ranked, note)
+
+
+# ---------------------------------------------------------------------------
 # Direct channels (structural signal)
 # ---------------------------------------------------------------------------
 def channel_hackernews(query, out_path, max_items):
+    # Pull a pool larger than max_items so the relevance/engagement ranker
+    # has something to choose from (Algolia's own order is match-based).
+    pool = min(50, max(30, max_items * 3))
     url = (
         "https://hn.algolia.com/api/v1/search?"
-        + urllib.parse.urlencode({"query": query, "tags": "story", "hitsPerPage": max_items})
+        + urllib.parse.urlencode({"query": query, "tags": "story", "hitsPerPage": pool})
     )
     data = get_json(url, timeout=20)
-    hits = data.get("hits", [])
+    hits = [
+        {**h, "_rank_text": h.get("title") or h.get("story_title") or ""}
+        for h in data.get("hits", [])
+    ]
+    ranked = rank_items(
+        hits,
+        query,
+        text_key="_rank_text",
+        engagement_key="points",
+        comments_key="num_comments",
+        max_items=max_items,
+    )
     lines = [f"# Hacker News — top stories for: {query}\n"]
-    if not hits:
+    if ranked.note:
+        lines.append(f"_Note: {ranked.note}._\n")
+    if not ranked.items:
         lines.append("_No stories found._\n")
-    for h in hits:
+    for h in ranked.items:
         title = h.get("title") or h.get("story_title") or "?"
         obj = h.get("objectID", "")
         u = h.get("url") or f"https://news.ycombinator.com/item?id={obj}"
@@ -350,7 +458,7 @@ def channel_hackernews(query, out_path, max_items):
         lines.append(f"  - link: {u}")
         lines.append(f"  - discussion: {hn}")
     out_path.write_text("\n".join(lines) + "\n")
-    return len(hits)
+    return len(ranked.items)
 
 
 def channel_hiring(query, out_path, max_items):
@@ -468,26 +576,138 @@ def channel_github(query, out_path, max_items):
     return len(repos.get("items", [])) + len(issues.get("items", []))
 
 
-def channel_reddit(query, out_path, max_items):
-    """Best-effort: Reddit throttles unauthenticated .json and may return
-    HTML — in which case we raise so the wrapper writes ERROR.md."""
-    url = "https://www.reddit.com/search.json?" + urllib.parse.urlencode(
-        {"q": query, "sort": "top", "t": "year", "limit": max_items}
-    )
-    data = get_json(url, timeout=20)  # raises/JSON-decode-errors if HTML served
-    children = data.get("data", {}).get("children", [])
-    lines = [f"# Reddit — top posts for: {query}\n"]
-    if not children:
-        lines.append("_No posts found._\n")
-    for ch in children:
-        d = ch.get("data", {})
-        lines.append(
-            f"- **{d.get('title','?')}** — ▲{d.get('ups',0)}, {d.get('num_comments',0)} comments, "
-            f"r/{d.get('subreddit','?')}"
+ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api"
+_REDDIT_MAX_SUBS = 4        # subreddits searched per run (rate-limit friendly)
+_REDDIT_POOL_PER_SUB = 25   # posts pulled per subreddit before ranking
+_REDDIT_WINDOW_DAYS = 365   # recency window
+_ARCTIC_SHIFT_RETRY_SLEEP = 3.0  # seconds before the single 429 retry
+
+
+def _arctic_shift_json(url, timeout=30):
+    """GET with ONE polite retry on 429 — Arctic-Shift rate-limits complex
+    queries (observed live: 'Too many complex queries. Please slow down.').
+    A persistent 429 or any other error propagates so the run_connector
+    wrapper writes ERROR.md."""
+    try:
+        return get_json(url, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        if e.code != 429:
+            raise
+        time.sleep(_ARCTIC_SHIFT_RETRY_SLEEP)
+        return get_json(url, timeout=timeout)
+
+
+def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
+    """Arctic-Shift's free-text post search REQUIRES a subreddit (or author)
+    filter — verified live 2026-07-17: 400 \"'query' query parameter requires
+    one of: author, subreddit\". So: prefix-match distinctive topic tokens
+    against the subreddit index, keep the candidates whose name/description
+    actually relate to the topic, best (relevance, subscribers) first."""
+    candidates = {}
+    joined_topic = "".join(_rank_tokens(query))  # "prompt engineering" -> "promptengineering"
+    for token in _rank_tokens(query)[:5]:
+        if len(token) < 3:
+            continue
+        url = f"{ARCTIC_SHIFT_BASE}/subreddits/search?" + urllib.parse.urlencode(
+            {"subreddit_prefix": token, "limit": 10}
         )
-        lines.append(f"  - https://www.reddit.com{d.get('permalink','')}")
+        for row in _arctic_shift_json(url, timeout=25).get("data") or []:
+            name = row.get("display_name") or ""
+            if not name or name in candidates:
+                continue
+            about = " ".join(
+                str(row.get(k) or "")
+                for k in ("display_name", "title", "public_description")
+            )
+            rel = relevance_score(about, query)
+            # CamelCase names tokenize to one word ("PromptEngineering") and
+            # would score 0 — a name that IS the topic concatenated is the
+            # strongest possible signal.
+            if joined_topic and joined_topic in name.lower():
+                rel = 1.0
+            candidates[name] = (rel, row.get("subscribers") or 0)
+    ordered = sorted(candidates.items(), key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))
+    return [name for name, _ in ordered[:limit]]
+
+
+def channel_reddit(query, out_path, max_items):
+    """Reaction-weighted Reddit via the free Arctic-Shift archive (the old
+    reddit.com/search.json path is dead — Reddit throttles unauthenticated
+    JSON). Real `score` + `num_comments` confirmed in the live API. No
+    server-side score sort exists (sort_type: default|created_utc only), so
+    posts are pulled recent-first and ranked here via rank_items. Comment
+    bodies are NOT pulled: /api/comments/search 422s (\"Timeout. Maybe slow
+    down a bit\") — too expensive for a Tier-0 pass."""
+    subs = _arctic_shift_discover_subreddits(query)
+    lines = [f"# Reddit — top posts for: {query}\n"]
+    if not subs:
+        lines.append(
+            "_No posts pulled: Arctic-Shift text search requires a subreddit "
+            "filter and no candidate subreddit matched this topic's tokens._\n"
+        )
+        out_path.write_text("\n".join(lines) + "\n")
+        return 0
+
+    after = time.strftime(
+        "%Y-%m-%d", time.gmtime(time.time() - _REDDIT_WINDOW_DAYS * 86400)
+    )
+    posts, seen = [], set()
+    for i, sub in enumerate(subs):
+        if i:  # pace the "complex" text-search queries a little
+            time.sleep(0.5)
+        url = f"{ARCTIC_SHIFT_BASE}/posts/search?" + urllib.parse.urlencode(
+            {
+                "query": query,
+                "subreddit": sub,
+                "after": after,
+                "limit": _REDDIT_POOL_PER_SUB,
+                "sort": "desc",
+                "sort_type": "created_utc",
+                "fields": "id,title,score,num_comments,subreddit,created_utc,selftext",
+            }
+        )
+        for p in _arctic_shift_json(url, timeout=30).get("data") or []:
+            pid = p.get("id")
+            if pid and pid in seen:
+                continue
+            seen.add(pid)
+            p["_rank_text"] = f"{p.get('title') or ''} {(p.get('selftext') or '')[:400]}"
+            posts.append(p)
+
+    scope = ", ".join(f"r/{s}" for s in subs)
+    lines.append(f"_Source: Arctic-Shift archive (free), last year. Scope: {scope}._\n")
+
+    if posts and not any("score" in p for p in posts):
+        lines.append(
+            "_Degraded: Arctic-Shift returned posts without score fields — "
+            "engagement ranking unavailable, order is relevance-only._\n"
+        )
+    ranked = rank_items(
+        posts,
+        query,
+        text_key="_rank_text",
+        engagement_key="score",
+        comments_key="num_comments",
+        max_items=max_items,
+    )
+    if ranked.note:
+        lines.append(f"_Note: {ranked.note}._\n")
+    if not ranked.items:
+        lines.append("_No posts found._\n")
+    for p in ranked.items:
+        lines.append(
+            f"- **{p.get('title','?')}** — ▲{p.get('score',0)}, "
+            f"{p.get('num_comments',0)} comments, r/{p.get('subreddit','?')}"
+        )
+        permalink = p.get("permalink")
+        if permalink:
+            lines.append(f"  - https://www.reddit.com{permalink}")
+        else:
+            lines.append(
+                f"  - https://www.reddit.com/r/{p.get('subreddit','?')}/comments/{p.get('id','')}"
+            )
     out_path.write_text("\n".join(lines) + "\n")
-    return len(children)
+    return len(ranked.items)
 
 
 def channel_bluesky(query, out_path, max_items):
@@ -547,7 +767,7 @@ CONNECTORS = {
         Connector("hiring", "direct", channel_hiring, "HN Who-is-hiring — job-market hotness for a topic", []),
         Connector("polymarket", "direct", channel_polymarket, "real-money prediction odds", []),
         Connector("github", "direct", channel_github, "repo stars + velocity + issues", []),
-        Connector("reddit", "direct", channel_reddit, "top posts by upvotes (best-effort)", []),
+        Connector("reddit", "direct", channel_reddit, "top posts via Arctic-Shift archive (free, score+comments)", []),
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
     ]
 }

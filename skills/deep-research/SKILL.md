@@ -143,7 +143,7 @@ you — raw numbers, odds, velocity):
 | **hiring** | HN "Who is hiring?" | job-market hotness — how many postings mention the topic + which companies (RAG/agents/context-eng spikes) |
 | **polymarket** | Gamma `/public-search` | real-money odds on the topic (implied %) |
 | **github** | repo + issue search (`gh`) | stars, push recency, top issues/PRs |
-| **reddit** | search.json | top posts by upvotes *(best-effort — Reddit throttles unauth JSON; degrades to ERROR.md)* |
+| **reddit** | Arctic-Shift archive (free) | reaction-weighted posts — real score+comments, relevance-ranked *(search.json is dead; degrades to ERROR.md)* |
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
 
 **Claude (this session)** — synthesis: reads the report files, writes
