@@ -10,7 +10,7 @@
     <dt>Target repo</dt><dd>zbs-research (paths repo-relative)</dd>
     <dt>Depth</dt><dd>Deep — phased</dd>
   </dl>
-  <p class="preservation">Product Contract preservation: <b>unchanged</b> — R1–R21 carried verbatim from the requirements-only version; this run adds Planning Contract, Implementation Units, Verification Contract, and Definition of Done.</p>
+  <p class="preservation">Product Contract preservation: R1–R21 carried verbatim; <b>R22 added</b> (2026-07-17 — market-pulse / product-launch source layer, per Nik) with KTD7, U12, U13. Planning Contract, Implementation Units, Verification Contract, and Definition of Done present.</p>
 </section>
 
 <nav class="jump">
@@ -61,13 +61,14 @@
       <tr><td id="r19">R19</td><td><b>Clean security posture</b> (last30days #565 High-Risk blocks clients): least-privilege + transparent "what it does / sends where".</td></tr>
       <tr><td id="r20">R20</td><td><b>Install doesn't fail</b> — passes <code>claude plugin validate</code>, correct <code>skills/&lt;name&gt;/SKILL.md</code> layout.</td></tr>
       <tr><td id="r21">R21</td><td><b>Smarter ranking than vote-count-only</b> (last30days #641): comment-evidence + relevance floor + anti-bot.</td></tr>
+      <tr><td id="r22">R22</td><td><b>Market-pulse source layer</b> — a distinct source class (not discourse): <em>launch-pulse</em> (what's shipping: Product Hunt, Show HN, yc-oss, DevHunt, MicroLaunch) + <em>revenue/exit-pulse</em> (what's selling/sold: Flippa, Substack leaderboards, Whop Trends, Gumtrends). Ranked by <b>launch-momentum + category-velocity</b>, not raw votes. Free-first (Show HN already covered, yc-oss/Flippa-sold/Substack/PH-token/DevHunt); revenue datasets opt-in pay-per-use. Skips gameable AI-directories (TAAFT/Futurepedia). AI-consulting has no good launch source — explicit gap.</td></tr>
     </tbody>
   </table>
 
   <h3>Scope boundaries</h3>
   <div class="cols">
     <div class="scope in"><b>In scope (v1)</b><ul><li>Full conversational wizard (R1–R5)</li><li>All tiers (R6–R12)</li><li>Demand signals + recording (R13–R15)</li><li>Two profiles (R16–R17)</li><li>Differentiation fixes (R18–R21)</li></ul></div>
-    <div class="scope out"><b>Non-goals / Deferred to Follow-Up</b><ul><li>Actual managed hosting backend — signal button only</li><li>Real payment/billing</li><li>Non-coder GUI/dashboard wrapper</li><li>LinkedIn connector</li><li>In-product done-for-you fulfillment (Nik's consulting, off-tool)</li></ul></div>
+    <div class="scope out"><b>Non-goals / Deferred to Follow-Up</b><ul><li>Actual managed hosting backend — signal button only</li><li>Real payment/billing</li><li>Non-coder GUI/dashboard wrapper</li><li>LinkedIn connector</li><li>In-product done-for-you fulfillment (Nik's consulting, off-tool)</li><li>Gameable AI-directories (TAAFT/Futurepedia) — redundant with PH, worse freshness</li><li>AI-consulting market-pulse — no good launch source exists (services market); explicit gap, not an oversight</li></ul></div>
   </div>
 </section>
 
@@ -82,6 +83,7 @@
       <tr><td id="ktd4">KTD4</td><td><b>Telegram via Telethon on a client-supplied session</b> from a <b>separate/secondary account</b>. A hard warning gate (must be acknowledged) precedes any session capture; the wizard never proceeds without it. Parsing is read-only; channel discovery uses <code>getChannelRecommendations</code> (subscriber-overlap) + forward-graph (from ideation).</td></tr>
       <tr><td id="ktd5">KTD5</td><td><b>Media backend = pluggable interface</b> chosen by <code>DEEP_RESEARCH_PROFILE</code>. <em>client</em> (default): cloud — Groq Whisper ($0.04/hr) + Gemini Flash vision (sub-cent). <em>self</em>: local MLX Whisper + Gemma-3 vision ($0, Mac-bound). Connectors return bytes+metadata; the adapter transcribes.</td></tr>
       <tr><td id="ktd6">KTD6</td><td><b>New sources extend the existing registry pattern</b> (<code>Connector(name, kind, fn, desc, requires)</code> + <code>channel_*</code> + <code>OUTPUT_NAMES</code>), not a rewrite. Keys reuse <code>read_key()</code>/<code>KEYS</code> with <code>DEEP_RESEARCH_SECRETS_DIR</code>; <code>scrapecreators</code>/<code>brave</code> key hooks already exist. Graceful <code>ERROR.md</code> degrade is inherited.</td></tr>
+      <tr><td id="ktd7">KTD7</td><td><b>Market-pulse ranks by launch-momentum + category-velocity, not raw votes.</b> launch-pulse score = upvotes × recency-decay × maker-engagement; category-velocity = count of similar launches in a window (the "how saturated is this niche" signal). revenue/exit-pulse ranks by realized revenue/multiple directly (Flippa sold-price, Substack ARR-rank, Whop revenue). <b>Free-first tiering:</b> Show HN (existing HN connector + <code>show_hn</code> filter), yc-oss/api (free JSON), Flippa sold-pages + API, Substack leaderboards, DevHunt (GitHub API) = Tier 0; Product Hunt = free read but OAuth token (Tier 1); Whop Trends ($99, has an MCP server — wrap or call), Gumtrends, Toolify-scrape = opt-in pay-per-use. Verify snippet-sourced prices/endpoints live before building.</td></tr>
     </tbody>
   </table>
 </section>
@@ -121,7 +123,8 @@
     ├── detect_state.py         # NEW — key/account detection, emits JSON (R2)
     ├── media_backend.py        # NEW — pluggable transcription/vision (R16, KTD5)
     ├── signals.py              # NEW — demand-signal JSONL + optional notify (R13-15)
-    ├── connectors/             # NEW dir — telegram.py, tiktok_ig.py, meta_ads.py
+    ├── connectors/             # NEW dir — telegram.py, tiktok_ig.py, meta_ads.py,
+    │                           #   launch_pulse.py, revenue_pulse.py
     └── selftest.sh             # + Windows-safe, $0-path, wizard-dry-run, validate checks
 tests/
 ├── test_detect_state.py       # NEW
@@ -226,6 +229,32 @@ tests/
     <dt>Verification</dt><dd>Runs only when explicitly enabled + keyed; default runs never touch it.</dd>
   </dl>
 
+  <h4 id="u12">U12. Launch-pulse connectors (market-pulse: what's shipping)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Surface what's launching now, ranked by launch-momentum + category-velocity — a leading market signal discourse can't give.</dd>
+    <dt>Requirements</dt><dd>R22</dd>
+    <dt>Dependencies</dt><dd>U10 (reuse the ranking helper for launch-momentum) — soft</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/connectors/launch_pulse.py</code> (new), <code>deep-research.py</code> (register + OUTPUT_NAMES), <code>tests/test_launch_pulse.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Free-first sub-sources: <b>Product Hunt</b> GraphQL v2 (free read, <code>PRODUCTHUNT_TOKEN</code> — Tier 1), <b>Show HN</b> (extend existing HN Algolia connector with <code>show_hn</code> tag — Tier 0, no new key), <b>yc-oss/api</b> (free JSON), <b>DevHunt</b> (listings as GitHub PRs → GitHub API), <b>MicroLaunch</b> (scrape, best-effort). Compute launch-momentum (upvotes × recency-decay × maker-engagement) and category-velocity (count of similar launches in window). Opt-in <b>Toolify</b> traffic-rank (scrape) for sustained-usage signal.</dd>
+    <dt>Execution note</dt><dd>Verify PH free-read token scope + Show HN filter live before building; snippet-sourced.</dd>
+    <dt>Patterns</dt><dd>Existing HN Algolia connector (Show HN is a filter on it); direct-connector registry shape; U10 ranking helper.</dd>
+    <dt>Test scenarios</dt><dd>Happy: topic → launches with momentum score + category-velocity count (PH mocked, yc-oss parsed). Show HN: <code>show_hn</code> filter returns product posts. Edge: PH token absent → Show HN/yc-oss still work (Tier-0 degrade). Error: MicroLaunch scrape fails → ERROR.md, siblings continue. Velocity: N similar launches counted correctly on a fixture.</dd>
+    <dt>Verification</dt><dd>Returns ranked launches with zero keys (Show HN + yc-oss); PH enriches when token present.</dd>
+  </dl>
+
+  <h4 id="u13">U13. Revenue/exit-pulse connectors (market-pulse: what's selling/sold)</h4>
+  <dl class="unit">
+    <dt>Goal</dt><dd>Surface revenue-verified traction and realized exits — the "proven value" signal (not launch-day hype) for hypothesis-validation and infoproducts.</dd>
+    <dt>Requirements</dt><dd>R22</dd>
+    <dt>Dependencies</dt><dd>none</dd>
+    <dt>Files</dt><dd><code>skills/deep-research/scripts/connectors/revenue_pulse.py</code> (new), <code>deep-research.py</code> (register), <code>tests/test_revenue_pulse.py</code> (new)</dd>
+    <dt>Approach</dt><dd>Free Tier-0: <b>Flippa</b> (documented API + free per-listing sold-price pages — realized exit multiples), <b>Substack</b> leaderboards (Rising + Bestsellers, free). Opt-in pay: <b>Whop Trends</b> ($99 lifetime — it ships an MCP server; wrap it or call its API), <b>Gumtrends</b> (one-time, Gumroad revenue estimates). Ranked by revenue/multiple directly, not votes. Niche map: Flippa→microsaas, Whop→AI-creator-economy, Gumtrends+Substack→infoproducts.</dd>
+    <dt>Execution note</dt><dd>Whop is opt-in and could be consumed via its MCP server rather than a bespoke connector — evaluate at build. Verify $99/one-time pricing live (snippet-sourced).</dd>
+    <dt>Patterns</dt><dd>Direct-connector shape; opt-in-key gating like TikTok/IG (U7); Meta-Ads money-signal sibling (U8).</dd>
+    <dt>Test scenarios</dt><dd>Happy: Flippa sold-page parsed → price/multiple; Substack leaderboard → ARR-ranked entries. Opt-in gate: Whop/Gumtrends skipped without key/config, recorded. Edge: Flippa rate-limit → ERROR.md. Assert revenue sources rank by revenue, not upvotes.</dd>
+    <dt>Verification</dt><dd>Flippa + Substack return revenue/exit data with zero keys; paid sources run only when enabled.</dd>
+  </dl>
+
   <h3>Phase C — Profiles, ranking quality, differentiation hardening</h3>
 
   <h4 id="u8">U8. Meta Ad Library connector (Tier-0 money signal)</h4>
@@ -280,7 +309,8 @@ tests/
   <ul>
     <li><b>Unit tests</b> for U1,U3,U4,U5,U6,U7,U8,U9,U10 pass (<code>tests/</code>), including request-shape assertions for cloud/OpenRouter (mocked, no live spend).</li>
     <li><b>selftest.sh</b> extended: <code>--list-connectors</code> shows new connectors; Tier-0 wizard dry-run produces a brief with zero keys; banned-POSIX grep clean; <code>claude plugin validate</code> exits 0; secret-scan clean; brief HTML self-contained.</li>
-    <li><b>Live smokes (documented, minimal spend):</b> one OpenRouter call per provider; Arctic-Shift score-field probe; Meta Ad Library EU query.</li>
+    <li><b>Live smokes (documented, minimal spend):</b> one OpenRouter call per provider; Arctic-Shift score-field probe; Meta Ad Library EU query; Product Hunt free-read token + Show HN filter; Flippa sold-page + Substack leaderboard (both free).</li>
+    <li><b>Market-pulse (U12/U13):</b> launch-momentum + category-velocity computed on a fixture; revenue sources rank by revenue not votes; Tier-0 launch/revenue sources work with zero keys.</li>
     <li><b>Cross-platform:</b> selftest green on macOS and on a Windows run (CI matrix or manual).</li>
     <li><b>Budget invariant:</b> a default run makes no Anthropic/OpenAI API calls (assert connector set excludes <code>openai</code>).</li>
   </ul>
@@ -297,6 +327,7 @@ tests/
     <li>Default run bills no Anthropic/OpenAI API (R17); OpenAI stays opt-in.</li>
     <li>Ranking fixture shows on-topic beating off-topic-viral (R21).</li>
     <li>Arctic-Shift score-field assumption confirmed or its fallback documented.</li>
+    <li>Market-pulse layer live (R22): launch-pulse (Show HN + yc-oss zero-key, PH with token) + revenue-pulse (Flippa + Substack zero-key) return ranked results; paid sources (Whop/Gumtrends) opt-in only.</li>
   </ul>
 </section>
 
