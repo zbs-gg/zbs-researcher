@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: мультиплатформенный research-плагин с реакциями</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2129; --fg:#c9d1d9; --muted:#8b949e;
+  --accent:#58a6ff; --accent-soft:#132f4c; --good:#3fb950; --good-soft:#12261e;
+  --warn:#d29922; --warn-soft:#2b2111; --bad:#f85149; --border:#30363d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;line-height:1.65}
+.wrap{max-width:900px;margin:0 auto;padding:48px 24px 96px}
+p,li{max-width:72ch}
+h1{font-size:1.7rem;line-height:1.25;margin:.2em 0 .3em;border-bottom:1px solid var(--border);padding-bottom:.4em}
+h2{font-size:1.25rem;margin:2.2em 0 .6em;color:#e6edf3}
+h3{font-size:1.05rem;margin:1.2em 0 .4em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:var(--panel);padding:.12em .4em;border-radius:5px;font-size:.9em}
+.eyebrow{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.meta{color:var(--muted);font-size:.82rem;margin:.3em 0 0}
+.meta b{color:var(--fg);font-weight:600}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.86rem}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+th{background:var(--panel);font-weight:600}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:1.2em 0}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-size:.85rem}
+.stat b{display:block;font-size:1.25rem;color:#e6edf3}
+.jump{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:1em 0;font-size:.88rem}
+.jump ol{margin:.4em 0 0;padding-left:1.4em}
+.jump li{margin:.2em 0}
+article.idea{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin:1.4em 0}
+article.idea h3{margin:0 0 .5em;font-size:1.12rem}
+.chip{display:inline-block;border-radius:999px;padding:.15em .7em;font-size:.72rem;margin-right:.5em;margin-bottom:.3em}
+.chip.axis{background:var(--accent-soft);color:var(--accent)}
+.chip.conf-hi{background:var(--good-soft);color:var(--good)}
+.chip.conf-md{background:var(--warn-soft);color:var(--warn)}
+.chip.cx{background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
+dl.fields{margin:.8em 0 0}
+dl.fields dt{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:.9em}
+dl.fields dd{margin:.25em 0 0}
+.basis{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:.85rem}
+.basis .tag{color:var(--good);font-weight:600}
+.downside{color:#e3b341}
+figure{margin:1.2em 0;padding:0}
+figcaption{font-size:.78rem;color:var(--muted);margin-top:.4em}
+svg text{font-family:ui-monospace,Menlo,monospace}
+footer.composition-signal{margin-top:4em;padding-top:1em;border-top:1px solid var(--border);color:var(--muted);font-size:.75rem}
+.gap{background:var(--warn-soft);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:.86rem;margin:1em 0}
+.gap .eyebrow{color:var(--warn)}
+</style>
+</head>
+<body><div class="wrap">
+
+<div class="eyebrow">ideation · ce-ideate</div>
+<h1>Мультиплатформенный research-плагин с учётом реакций</h1>
+<p class="meta"><b>date:</b> 2026-07-17 · <b>topic:</b> multi-platform-research-plugin · <b>mode:</b> elsewhere-software · <b>focus:</b> Reddit/HN/Telegram-граф/X/YouTube/TikTok/IG/LinkedIn — просто, дёшево, с реакциями; что упущено; правильный Reddit-путь</p>
+
+<div class="stats">
+  <div class="stat"><b>48 → 16 → 7</b>сырых → после дедупа → выжило</div>
+  <div class="stat"><b>5 осей</b>все покрыты</div>
+  <div class="stat"><b>7 sound / 9 weak / 0 refuted</b>вердикты верификатора</div>
+  <div class="stat"><b>~$0–47/мес</b>целевой прод-бюджет</div>
+</div>
+
+<h2 id="grounding-context">Grounding Context</h

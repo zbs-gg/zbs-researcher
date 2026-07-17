@@ -1,15 +1,10 @@
-# Python
+# Python / tooling
 __pycache__/
 *.pyc
 *.pyo
+.ruff_cache/
 
-# Research output
-research/
-deep-research-*/
-*.ERROR.md
-brief.html
-
-# Never commit secrets
+# Secrets — never commit
 *key*.txt
 *-key.txt
 secrets/
@@ -18,3 +13,8 @@ secrets/
 
 # OS
 .DS_Store
+
+# Runtime research output at repo ROOT only.
+# Committed example runs live under docs/ and are NOT ignored.
+/research/
+/deep-research-*/

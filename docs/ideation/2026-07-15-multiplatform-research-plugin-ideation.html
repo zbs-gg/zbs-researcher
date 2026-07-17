@@ -1,0 +1,292 @@
+<section class="doc-header">
+  <p class="eyebrow">Ideation</p>
+  <h1>Multi-platform research plugin with reaction-weighting</h1>
+  <dl class="meta">
+    <dt>Date</dt><dd><time datetime="2026-07-15">2026-07-15</time></dd>
+    <dt>Topic</dt><dd>multiplatform-research-plugin</dd>
+    <dt>Focus</dt><dd>Reddit / HN / Telegram(Telethon+graph) / X / YouTube / TikTok / IG / LinkedIn — cheapest working assembly, missed sources, current Reddit API path</dd>
+    <dt>Mode</dt><dd>elsewhere-software</dd>
+  </dl>
+  <div class="stats">
+    <span class="stat"><b>48</b> raw ideas</span>
+    <span class="stat"><b>16</b> merged</span>
+    <span class="stat"><b>7</b> survivors</span>
+    <span class="stat"><b>6</b> axes</span>
+    <span class="stat"><b>7 sound / 9 weak</b> verified</span>
+  </div>
+</section>
+
+<nav class="jump">
+  <b>Jump to idea:</b>
+  <a href="#i1">1 · $0-core + one paid slot</a>
+  <a href="#i2">2 · Local media spine</a>
+  <a href="#i3">3 · Telegram two-edge graph</a>
+  <a href="#i4">4 · Comments-as-reaction</a>
+  <a href="#i5">5 · Venue-normalized index</a>
+  <a href="#i6">6 · Sentinel cost pipeline</a>
+  <a href="#i7">7 · Money-tier</a>
+</nav>
+
+<section id="grounding">
+  <h2>Topic Context</h2>
+  <p>Nikita already runs a private research skill (Reddit + AI deep-research, X via Grok, YouTube via Gemini, HN+comments, and — the crown jewel — Telegram channels parsed via Telethon on a separate account, "gold that doesn't exist on the external internet, especially in comments"). He wants to release it free once TikTok/Instagram can be added <em>cheaply</em>, and he wants every source <strong>reaction-weighted</strong> (upvotes/likes/views/comments), not just fetched. The existing base is the <code>deep-research</code> plugin v0.2.0 — Python stdlib-only connector registry, parallel threading, ERROR.md degrade, manifest.json, plan-first, HTML brief. Budget canon: no Anthropic/OpenAI API spend by default; flat-rate subs (Claude Max, Codex) and local Mac compute (64 GB, LM Studio/MLX) preferred over per-token APIs.</p>
+  <p><b>The hard facts that shaped these ideas (July 2026):</b> Reddit self-service OAuth closed since Nov 2025 ("Responsible Builder Policy" — apply and wait days-to-never); Reddit <code>.json</code> dead (403 via TLS-fingerprint + IP-reputation since ~May 2026); RSS throttled to 1 req/min; <b>Arctic Shift</b> is the best free no-auth Reddit path (score fields plausible but <em>unconfirmed</em>). LinkedIn is the one genuinely hostile platform — Proxycurl was sued dead (July 2025), every automated path is banned/shallow/expensive. Local Whisper on his Mac = $0 transcription at 7-10× realtime; local Gemma-3 vision = $0/image. ScrapeCreators is genuinely pay-as-you-go (100 free credits, non-expiring), one vendor covering the three hardest gaps (Reddit comment trees, TikTok's 21 endpoints, IG reels/comments) behind a single key.</p>
+  <p><b>Two clarifications from Nikita during review (these reshaped the top ideas):</b> (1) He installs this <em>as a skill for clients too</em> — so anything that depends on <em>his</em> 64 GB Mac (local Whisper/vision) can't be the default; portability beats personal-$0. (2) <b>~$10/month is an acceptable ceiling.</b> A live pricing check then showed cloud transcription/vision is pennies — Groq Whisper-turbo $0.04/hr audio, Gemini Flash vision sub-cent/image, so $10/mo buys ~20-25× the realistic target volume. Net effect: the design now carries two <b>deployment profiles</b> — a <b>self</b> profile (local, $0, Mac-bound) and a <b>client/portable</b> profile (cloud-cheap, installs anywhere) — selected by config, not baked in. And for a client install, a cheap managed API beats a free-but-flaky OSS scraper the client can't babysit.</p>
+</section>
+
+<section id="axes">
+  <h2>Topic Axes</h2>
+  <ol class="axes">
+    <li><b>source-access</b> — how to reach each platform (method + cost)</li>
+    <li><b>telegram-graph</b> — channel discovery, source graph, folder refresh</li>
+    <li><b>reactions-ranking</b> — normalizing engagement cross-platform, comments as signal</li>
+    <li><b>architecture-cost</b> — pipeline design, local-compute leverage, cost ceiling</li>
+    <li><b>missed-sources</b> — high-signal sources not yet in the list, per the four niches</li>
+    <li><b>deployment-portability</b> — self (local, $0, Mac-bound) vs client (cloud-cheap, installs anywhere) <span class="added">· added in review</span></li>
+  </ol>
+</section>
+
+<section id="ideas">
+  <h2>Ranked Ideas</h2>
+
+  <article id="i1" class="idea">
+    <h3><span class="idnum">1.</span> $0-first, with a pay-per-use adapter — never a flat subscription</h3>
+    <p class="axis-tag">Axis: architecture-cost · source-access</p>
+    <p class="revised-note">Revised after a live pricing check (2026-07-15): the original "one $47/mo slot" was the wrong shape for low, uncertain volume — corrected to $0-first + metered fallback.</p>
+    <p><b>Description:</b> Day one works with <em>zero</em> keys: Telegram (Telethon) + HN + Reddit via Arctic Shift + YouTube Data API (free 10k units/day) + <code>yt-dlp</code>→local Whisper + own Grok sub + Meta Ad Library (free) + local Gemma-3 vision, plus free-OSS scrapers where they hold up (<code>instaloader</code> for logged-out IG, <code>davidteather/TikTok-Api</code> for TikTok). The paid layer is a thin <code>platform-adapter</code> whose vendor is a config choice — <code>free-oss → apify → scrapecreators</code> — engaged only when a free path is throttled, and billed <em>per use</em>. The goal is a literal <b>$0 in a quiet month</b>, spend only on real overflow. The key correction: don't buy a monthly subscription. The genuinely metered option is <b>ScrapeCreators</b> — 100 free credits, and its $47 "Freelance" is <em>not</em> a monthly fee but 25,000 non-expiring credits (≈ 5-12 months at your volume, ~$4-9/mo amortized). Apify's Free plan gives $5/mo of credit (cheap actors: TikTok <code>apidojo</code> $0.30/1k) but hard-caps — overflow forces the $29/mo Starter, which overshoots low usage.</p>
+    <div class="figure">
+      <svg viewBox="0 0 720 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A free-OSS core with no keys, and a metered adapter that only engages on throttle, choosing among free-oss, apify pay-per-use, or scrapecreators non-expiring credits">
+        <style>
+          .lbl{font:13px system-ui;fill:var(--fg);} .lblb{font:600 13px system-ui;fill:var(--fg);}
+          .cap{font:11px system-ui;fill:var(--muted);} .capb{font:600 11px system-ui;fill:var(--fg);}
+        </style>
+        <rect x="12" y="20" width="420" height="230" rx="10" fill="var(--free-fill)" stroke="var(--free-stroke)"/>
+        <text x="28" y="44" class="lblb">$0 CORE — no keys, quiet month = $0</text>
+        <text x="28" y="70" class="lbl">Telegram · HN · Reddit (Arctic Shift)</text>
+        <text x="28" y="92" class="lbl">YouTube API · yt-dlp → local Whisper</text>
+        <text x="28" y="114" class="lbl">X (Grok sub) · Meta Ad Library (free)</text>
+        <text x="28" y="136" class="lbl">local Gemma-3 vision · GitHub · Polymarket</text>
+        <text x="28" y="162" class="capb">free-OSS scrapers (flaky, no cost):</text>
+        <text x="28" y="182" class="lbl">instaloader (IG) · TikTok-Api (comments)</text>
+        <text x="28" y="216" class="cap">covers most of the matrix at $0 marginal</text>
+        <!-- throttle arrow -->
+        <text x="452" y="120" class="capb" style="text-anchor:middle">on</text>
+        <text x="452" y="135" class="capb" style="text-anchor:middle">throttle</text>
+        <path d="M436 145 L476 145" stroke="var(--paid-stroke)" stroke-width="2" marker-end="url(#a2)"/>
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--paid-stroke)"/></marker></defs>
+        <rect x="484" y="20" width="224" height="230" rx="10" fill="var(--paid-fill)" stroke="var(--paid-stroke)"/>
+        <text x="500" y="44" class="lblb">METERED ADAPTER</text>
+        <text x="500" y="62" class="cap">vendor = config, billed per use</text>
+        <text x="500" y="92" class="capb">ScrapeCreators (true PAYG)</text>
+        <text x="500" y="110" class="lbl">100 free · $47 = 25k credits,</text>
+        <text x="500" y="126" class="lbl">non-expiring (~$4-9/mo)</text>
+        <text x="500" y="152" class="capb">Apify Free</text>
+        <text x="500" y="170" class="lbl">$5/mo credit, apidojo $0.30/1k;</text>
+        <text x="500" y="186" class="lbl">caps → $29 Starter overshoots</text>
+        <text x="500" y="220" class="cap">absent → ERROR.md degrade,</text>
+        <text x="500" y="236" class="cap">$0 core still works</text>
+      </svg>
+    </div>
+    <p><b>Basis:</b> <code>direct:</code> "ScrapeCreators… 100% pay-as-you-go, no subscriptions, credits never expire; Freelance $47 = 25,000 credits @ $1.88/1k" + "Apify Free $5/mo credit, hard-caps; Starter $29/mo; apidojo TikTok $0.30/1k" + "Reddit's own API free 100 QPM for personal use (but Nov 2025 Responsible Builder Policy approval)" + "no Anthropic/OpenAI API by default; local Mac compute preferred." <code>external:</code> instaloader (MIT, active Apr 2026), davidteather/TikTok-Api (active, needs proxies) as the $0 flaky tier.</p>
+    <p><b>Rationale:</b> This is the literal answer to "doesn't cost a spaceship," corrected for <em>low, uncertain</em> volume: a flat subscription is the worst shape — you pay in months you barely touch it. Metering means a quiet month is $0 and a busy month is a few dollars. Making the vendor a config choice (not a hardcoded key) also fits the public release and the two deployment profiles: on a <b>client</b> install a cheap managed API (ScrapeCreators/Apify per-use) is the <em>right</em> default because the client can't babysit proxies for a flaky OSS scraper; the free-OSS tier is the <b>self</b> profile where you accept fragility for $0.</p>
+    <p><b>Downsides:</b> The $0 free-OSS tier is <em>flaky by nature</em> — <code>TikTok-Api</code> needs proxies and upkeep against bot-detection; <code>instaloader</code> risks account locks if run authenticated (safe only logged-out, light, delayed). So "$0" buys lower reliability; the metered adapter is the reliability upgrade, not a luxury. Reddit's free API needs the Nov-2025 approval (or stay on Arctic Shift). <b>Load-bearing check:</b> confirm Arctic Shift actually returns Reddit score fields before defaulting to it — reaction-weighting for Reddit hangs on it. The $10 ScrapeCreators "Solo Dev" tier (5k credits) is reported by third parties but not on the live pricing page — check the billing dashboard.</p>
+    <p class="meta-line"><b>Confidence:</b> 88% &nbsp;·&nbsp; <b>Complexity:</b> Medium</p>
+  </article>
+
+  <article id="i2" class="idea">
+    <h3><span class="idnum">2.</span> One media-to-text adapter with a pluggable backend — cloud by default, local as opt-in</h3>
+    <p class="axis-tag">Axis: architecture-cost · deployment-portability</p>
+    <p class="revised-note">Revised after "I install this on clients too": the local-only spine was wrong for a product shipped to other machines. A live pricing check (2026-07-15) showed cloud transcription is pennies, so portability wins with no real cost hit.</p>
+    <p><b>Description:</b> YouTube, TikTok, IG Reels, IG carousels, LinkedIn media all need transcription or image-reading. Build it once: the connector contract shrinks to "return bytes + metadata," and everything routes through one <code>media-to-text</code> stage — but its backend is a <b>deployment-profile config</b>, not hardcoded. <b>Client / portable profile (default):</b> cloud STT + vision that runs on any machine — <b>Groq Whisper-turbo at $0.04/hour audio</b> and <b>Gemini Flash vision at sub-cent/image</b>. <b>Self profile (opt-in):</b> local MLX Whisper + Gemma-3 vision for your own $0 runs on the 64 GB Mac. Same interface, backend swapped by who's running it. Platform transcript endpoints (ScrapeCreators, ~$0.001-0.002/call, flat by length) stay as an optional shortcut where auto-caption quality is enough.</p>
+    <div class="figure">
+      <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Every video and image connector returns raw bytes into one media-to-text adapter, whose backend is chosen by deployment profile: cloud Groq plus Gemini for clients, or local MLX for the author">
+        <style>.n{fill:var(--node-fill);stroke:var(--node-stroke);} .nt{font:12px system-ui;fill:var(--fg);text-anchor:middle;} .lblb{font:600 13px system-ui;fill:var(--fg);} .cap{font:11px system-ui;fill:var(--muted);} .capb{font:600 11px system-ui;fill:var(--fg);}</style>
+        <text x="80" y="30" class="capb">connectors → bytes</text>
+        <rect x="24" y="44" width="130" height="26" rx="6" class="n"/><text x="89" y="61" class="nt">YouTube · TikTok</text>
+        <rect x="24" y="80" width="130" height="26" rx="6" class="n"/><text x="89" y="97" class="nt">IG reel / carousel</text>
+        <rect x="24" y="116" width="130" height="26" rx="6" class="n"/><text x="89" y="133" class="nt">LinkedIn media</text>
+        <path d="M158 95 L214 125" stroke="var(--node-stroke)" stroke-width="1.5" fill="none"/>
+        <path d="M158 57 L214 120" stroke="var(--node-stroke)" stroke-width="1.5" fill="none"/>
+        <path d="M158 129 L214 130" stroke="var(--node-stroke)" stroke-width="1.5" fill="none"/>
+        <rect x="216" y="110" width="150" height="42" rx="8" fill="var(--free-fill)" stroke="var(--free-stroke)"/><text x="291" y="130" class="nt" style="font-weight:600">media-to-text</text><text x="291" y="145" class="nt" style="font-size:10px">"return bytes + metadata"</text>
+        <text x="291" y="176" class="cap" style="text-anchor:middle">backend = deployment profile</text>
+        <path d="M368 131 L410 100" stroke="var(--paid-stroke)" stroke-width="2" fill="none" marker-end="url(#a3)"/>
+        <path d="M368 131 L410 165" stroke="var(--free-stroke)" stroke-width="2" fill="none" marker-end="url(#a4)"/>
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--paid-stroke)"/></marker><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--free-stroke)"/></marker></defs>
+        <rect x="414" y="66" width="290" height="66" rx="8" fill="var(--paid-fill)" stroke="var(--paid-stroke)"/>
+        <text x="428" y="88" class="lblb">CLIENT / PORTABLE (default)</text>
+        <text x="428" y="107" class="cap">Groq Whisper-turbo $0.04/hr audio</text>
+        <text x="428" y="123" class="cap">Gemini Flash vision ~sub-cent/image</text>
+        <rect x="414" y="146" width="290" height="62" rx="8" fill="var(--free-fill)" stroke="var(--free-stroke)"/>
+        <text x="428" y="168" class="lblb">SELF (opt-in)</text>
+        <text x="428" y="187" class="cap">local MLX Whisper + Gemma-3 vision</text>
+        <text x="428" y="203" class="cap">$0, but needs the 64 GB Mac</text>
+      </svg>
+    </div>
+    <p><b>Basis:</b> <code>direct:</code> "Groq Whisper-turbo $0.04/hr audio (5 hrs/mo = $0.20); Gemini 2.5 Flash vision $0.00008-0.00046/image; $10/mo ≈ 250 hrs audio or 20k images — target volume ~$0.40/mo, 3-4% of ceiling" + "MLX Whisper ≈7-10× realtime, $0 marginal but Apple-Silicon-bound" + "ScrapeCreators transcript flat ~$0.001-0.002/call, platform auto-caption quality."</p>
+    <p><b>Rationale:</b> The biggest lever, corrected for the fact that this ships to <em>clients</em>: local compute is $0 for you but doesn't install on a client's ordinary laptop. Making the backend a profile choice keeps your personal $0 path <em>and</em> gives clients a portable one that costs cents — $10/mo buys ~20-25× the realistic target volume. Still one integration, not five.</p>
+    <p><b>Downsides:</b> Two backends = two code paths to test (cloud + local), though the interface hides it. Cloud STT/vision means client data leaves the machine (a privacy note for client contracts). Gemini/Groq are per-token APIs — allowed here because they're neither Anthropic nor OpenAI and the spend is trivial, but it's still a key the client must hold.</p>
+    <p class="meta-line"><b>Confidence:</b> 90% &nbsp;·&nbsp; <b>Complexity:</b> Medium</p>
+  </article>
+
+  <article id="i3" class="idea">
+    <h3><span class="idnum">3.</span> Telegram: a standing two-edge graph, with folders as auto-proposed views</h3>
+    <p class="axis-tag">Axis: telegram-graph</p>
+    <p><b>Description:</b> Build one persistent Telegram graph with <em>two</em> edge types: subscriber-overlap (from <code>channels.getChannelRecommendations</code>, confirmed live &amp; Telethon-callable, zero cost) for "who's adjacent," and forward/mention edges (mined via Telethon) for "who influences whom." Walk forwards <em>backwards</em> to find the upstream originator channels everyone in a niche forwards from — one hop upstream is the whole value for fast-moving niches. Then invert folder authority: the graph <em>proposes</em> folder membership per niche and Nik prunes a weekly diff ("+4 candidates, 2 gone quiet, 1 drifted"), with rule-based entry/exit thresholds so folders don't bloat monotonically.</p>
+    <div class="figure">
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two edge types on the same channels: subscriber-overlap finds adjacent channels, forward edges walked backwards find upstream originators">
+        <style>
+          .n{fill:var(--node-fill);stroke:var(--node-stroke);} .nt{font:600 12px system-ui;fill:var(--fg);text-anchor:middle;}
+          .e1{stroke:var(--edge-overlap);stroke-width:2;fill:none;} .e2{stroke:var(--edge-fwd);stroke-width:2.5;fill:none;marker-end:url(#arr);}
+          .k{font:12px system-ui;fill:var(--muted);} .kb{font:600 12px system-ui;fill:var(--fg);}
+        </style>
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--edge-fwd)"/></marker></defs>
+        <!-- seed cluster -->
+        <circle cx="300" cy="150" r="30" class="n"/><text x="300" y="154" class="nt">seed</text>
+        <circle cx="200" cy="90" r="26" class="n"/><text x="200" y="94" class="nt">adj A</text>
+        <circle cx="200" cy="210" r="26" class="n"/><text x="200" y="214" class="nt">adj B</text>
+        <!-- overlap edges -->
+        <path d="M274 133 L222 100" class="e1"/><path d="M274 167 L222 200" class="e1"/>
+        <!-- upstream originator -->
+        <circle cx="560" cy="150" r="32" class="n" style="stroke-dasharray:5 3"/><text x="560" y="146" class="nt">upstream</text><text x="560" y="162" class="nt">source</text>
+        <!-- forward edges (backwards walk shown pointing into seed) -->
+        <path d="M528 150 L332 150" class="e2"/>
+        <path d="M540 128 Q430 60 224 82" class="e2"/>
+        <text x="150" y="150" class="kb">overlap edges</text><text x="150" y="166" class="k">"who's adjacent"</text>
+        <text x="470" y="235" class="kb">forward edges (walked ←)</text><text x="470" y="251" class="k">"who they all read"</text>
+      </svg>
+    </div>
+    <p><b>Basis:</b> <code>direct:</code> "channels.getChannelRecommendations CONFIRMED live, Telethon-callable 2026… recommends by SUBSCRIBER OVERLAP (not content)… BFS from seed channels = cheapest defensible graph expansion" + "Edge = source→dest per forwarded message = 'who influences whom', complements subscriber-overlap." <code>external:</code> maxbundscherer/telegram-analysis (forward graph, NetworkX+Louvain), MargotP/telegram_similar_channels_finder (working call), S&amp;P/Russell reconstitution (rule-based membership refresh).</p>
+    <p><b>Rationale:</b> Subscriber-overlap alone converges on the incestuous core of each niche (it recommends more-of-the-same by construction) — the forward layer is what surfaces the small high-signal channels that are the actual "gold." Making the folder a materialized graph view turns his stated "periodic refresh" chore into an approval queue, and it's the single most demo-able feature for a public release.</p>
+    <p><b>Downsides:</b> Non-Premium accounts get a <em>truncated</em> recommendations list; the full graph likely needs Telegram Premium on the parsing account (a small monthly cost — verify the exact figure, it is not in the research). Forward-graph mining only sees public forwards; heavily-private niches leak less signal.</p>
+    <p class="meta-line"><b>Confidence:</b> 85% &nbsp;·&nbsp; <b>Complexity:</b> Medium</p>
+  </article>
+
+  <article id="i4" class="idea">
+    <h3><span class="idnum">4.</span> Comments are the reaction; counters are the tiebreaker</h3>
+    <p class="axis-tag">Axis: reactions-ranking</p>
+    <p><b>Description:</b> Redefine "reaction-weighted" away from raw likes/upvotes. The comment tree <em>is</em> the reaction; counters are its cheapest proxy. Run a local model over comment trees ($0 on his Mac) to score stance (agree / dispute / tried-it-and-failed / bought-it) and extract claims, then rank by <em>evidenced</em> reaction. Weight what's expensive to fake — replies-per-view, tree depth, distinct-commenter count, presence of disagreement — and actively penalize the like-heavy/comment-light signature of botted posts, emitting a "too clean to be real" flag as its own research output. Attach a collection-confidence flag (verified / estimated / partial-failure) to every count so a <em>failed scrape</em> never reads as "nobody reacted."</p>
+    <p><b>Basis:</b> <code>direct:</code> "gold that doesn't exist on external internet, especially comments" + "IG comments ~90% success, most error-prone" + "Arctic Shift score fields plausible but unconfirmed" + "Mac 64GB + LM Studio/MLX local models available." <code>reasoned:</code> his target niches (OF-agency, infoproducts) are literally taught engagement-inflation on BlackHatWorld — a ranker that trusts platform counters imports its own subjects' manipulation into its output, so expensive-to-fake interaction structure is a directly-motivated design choice, not a generic one.</p>
+    <p><b>Rationale:</b> This is the plugin's defensible differentiator — every aggregator ships like-counts; almost none ship "412 comments, 61% practitioners confirming, top dispute: chargebacks." And it's the one ranking decision that's painful to retrofit: build on raw counts first and you re-score the whole historical corpus later.</p>
+    <p><b>Downsides:</b> Local LLM comment-scoring at corpus scale is the heaviest compute item here (still $0 in cash, but real wall-clock). Stance-scoring quality on multilingual RU/Asian creator-economy comments is unproven and needs its own eval on his data.</p>
+    <p class="meta-line"><b>Confidence:</b> 85% &nbsp;·&nbsp; <b>Complexity:</b> Medium-High</p>
+  </article>
+
+  <article id="i5" class="idea">
+    <h3><span class="idnum">5.</span> Venue-normalized reaction index, calibrated by cross-posts</h3>
+    <p class="axis-tag">Axis: reactions-ranking</p>
+    <p><b>Description:</b> A HN thread at 300 points and a TikTok at 50k views aren't comparable on raw numbers, so express every item's engagement <em>relative to its own venue's trailing baseline</em>, indexed to 100 (a "wRC+ for posts": 180 = 80% above normal for that subreddit/channel/hashtag), with small-sample items regressed toward the venue prior (the Wilson score — which is literally Reddit's own "best"-sort math). Then use cross-posted content — the same URL on HN and Reddit, the same clip on TikTok/Reels matched by local-Whisper transcript similarity — as paired observations to fit empirical "exchange rates" between platforms. Dedup, which the pipeline needs anyway, becomes the calibration instrument for free.</p>
+    <div class="figure">
+      <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Raw platform counts are incomparable; normalizing each to its venue baseline at 100 makes them comparable, and cross-posts calibrate exchange rates between platforms">
+        <style>.ax{stroke:var(--muted);stroke-width:1;} .bar1{fill:var(--paid-stroke);} .bar2{fill:var(--free-stroke);} .t{font:11px system-ui;fill:var(--muted);text-anchor:middle;} .tb{font:600 12px system-ui;fill:var(--fg);text-anchor:middle;}</style>
+        <text x="180" y="20" class="tb">RAW (incomparable)</text>
+        <line x1="60" y1="150" x2="300" y2="150" class="ax"/>
+        <rect x="80" y="60" width="40" height="90" class="bar1"/><text x="100" y="168" class="t">TikTok 50k</text>
+        <rect x="180" y="130" width="40" height="20" class="bar2"/><text x="200" y="168" class="t">HN 300</text>
+        <text x="540" y="20" class="tb">VENUE-NORMALIZED (100=baseline)</text>
+        <line x1="420" y1="150" x2="680" y2="150" class="ax"/>
+        <line x1="420" y1="105" x2="680" y2="105" stroke="var(--muted)" stroke-dasharray="3 3"/><text x="700" y="108" class="t" style="text-anchor:end">100</text>
+        <rect x="450" y="120" width="40" height="30" class="bar1"/><text x="470" y="168" class="t">TikTok 66</text>
+        <rect x="560" y="70" width="40" height="80" class="bar2"/><text x="580" y="168" class="t">HN 178</text>
+        <text x="540" y="192" class="t">the HN thread was actually the stronger signal</text>
+      </svg>
+    </div>
+    <p><b>Basis:</b> <code>external:</code> FanGraphs wRC+/OPS+ (100 = park-and-era-adjusted baseline); Evan Miller "How Not To Sort By Average Rating" (Wilson score, Reddit's real "best" sort); The Economist Big Mac Index (PPP via one cross-listed good). <code>direct:</code> local Whisper is $0 for the transcript-matching substrate, which the constraints already require building.</p>
+    <p><b>Rationale:</b> Without venue-relative normalization the "reaction-weighted" promise is structurally broken — TikTok drowns everything on raw counts. This is the smallest algorithm that fixes it, and cross-post calibration is the only cross-platform bridge that's an own-eval on his own feed rather than trusting someone's benchmark.</p>
+    <p><b>Downsides:</b> Needs a rolling per-venue history before the index means anything (cold-start problem — pairs with the corpus-daemon idea). Cross-post pairs may be sparse for niche RU/TG content that never touches HN/Reddit, weakening exchange-rate fits exactly where his gold lives.</p>
+    <p class="meta-line"><b>Confidence:</b> 80% &nbsp;·&nbsp; <b>Complexity:</b> Medium</p>
+  </article>
+
+  <article id="i6" class="idea">
+    <h3><span class="idnum">6.</span> Reaction-gated two-stage pipeline with per-niche sentinels</h3>
+    <p class="axis-tag">Axis: architecture-cost</p>
+    <p><b>Description:</b> Exploit the pricing asymmetry the platforms already encode: broad search is ~100× the cost of polling known IDs (YouTube <code>search.list</code>=100 units vs <code>videos.list</code>=1; TikTok search vs profile credits). Per niche, run one expensive broad sweep to elect ~20-50 "sentinel" accounts/hashtags/subreddits, then poll only sentinels on cheap endpoints. Split every pull into a cheap metadata pass (counts only) → reaction pre-score → and only <em>then</em> spend the expensive step (transcription, comment trees, paid credits) on the top-N survivors. A sentinel engagement spike is the tripwire that authorizes the next paid broad sweep.</p>
+    <p><b>Basis:</b> <code>direct:</code> "commentThreads.list=10 units (hundreds/day fine), search.list=100 units (expensive), videos.list=1" + "ScrapeCreators 100 free credits, ~$0.0006-0.002/credit." <code>external:</code> WHO GISRS sentinel influenza surveillance (continuous cheap monitoring under a hard sampling budget, escalate on signal).</p>
+    <p><b>Rationale:</b> This makes reaction-weighting pay for itself as <em>cost control</em>, not just a ranking feature — it turns the cost ceiling from a hope into a design property: steady-state spend = (sentinel count × cheap-endpoint price), with paid searches gated behind an observable trigger instead of a cron job.</p>
+    <p><b>Downsides:</b> Sentinel election can miss a brand-new channel that hasn't accumulated signal yet (the tripwire is lagging). Some tension with a strict "ignore anything &lt;48h" freshness rule — this idea <em>needs</em> early velocity as its trigger, so freshness policy must be decided coherently with it.</p>
+    <p class="meta-line"><b>Confidence:</b> 80% &nbsp;·&nbsp; <b>Complexity:</b> Medium</p>
+  </article>
+
+  <article id="i7" class="idea">
+    <h3><span class="idnum">7.</span> A money-tier: treat spend/revenue as the highest-weight reaction</h3>
+    <p class="axis-tag">Axis: missed-sources</p>
+    <p><b>Description:</b> Add a distinct source class whose "reaction" metric is <em>money</em>, not applause: Meta Ad Library (what OF-agencies &amp; course-sellers pay to promote), Gumtrends (what infoproducts actually sell, est. revenue on 250k+ products), Whop (paid cohort/infoproduct data), Skool leaderboards (which paid communities are actually active), TikTok Creative Center top ads. Tag it separately from the reaction-weighted content lane, and let the divergence between the two tiers — what discourse says is hot vs what money confirms — <em>be</em> the research finding. Sustained ad-spend over weeks is the one engagement signal nobody bots against themselves.</p>
+    <p><b>Basis:</b> <code>direct:</code> "Meta Ad Library API (official, free ~200 calls/hr; identity verification + App Review 5-10 days; full commercial detail EU-ONLY under DSA, US = bucketed/political) — top gap for OF-agency/infoproduct ad-spy" + "Gumtrends 250k+ products w/ est revenue — what actually SELLS" + "Whop API, Skool leaderboards." <code>external:</code> wastewater epidemiology (hard-to-fake aggregate behavioral signal beating self-report).</p>
+    <p><b>Rationale:</b> This is the single highest signal-per-dollar addition and the direct answer to "what sources did I miss" — three of his four niches are saturated with performative "I made $30k with AI" discourse; upvotes measure applause, ad-spend and revenue measure conviction. A hypothesis-validation tool that only reads discourse validates hype, not demand. Meta Ad Library is the one missed source that covers two niches at once — but its App Review has a 5-10 day lead time, so it must be filed <em>now</em>, aimed at EU scope.</p>
+    <p><b>Downsides:</b> Meta Ad Library's full commercial detail is EU-only under DSA — US coverage is bucketed/political and much weaker. Several money sources (Gumtrends, Skool) are scraper-based, not official APIs, so they carry their own fragility and small cost.</p>
+    <p class="meta-line"><b>Confidence:</b> 85% &nbsp;·&nbsp; <b>Complexity:</b> Low-Medium</p>
+  </article>
+</section>
+
+<section id="rejects">
+  <h2>Rejection Summary</h2>
+  <table>
+    <thead><tr><th>Idea</th><th>Reason cut</th></tr></thead>
+    <tbody>
+      <tr><td>Reddit seed-list + ticket-now (standalone)</td><td>Folded into idea 1 ($0-core) — same Arctic-Shift-default mechanism; the "file the ticket now" tactic is a one-liner, not a standalone direction.</td></tr>
+      <tr><td>Clipper connector / human-as-sensor (standalone)</td><td>Real pattern (Zotero/Obsidian/eBird) but "zero ban risk" overclaimed and free-release adoption untested; kept as the LinkedIn/Discord component inside idea 1 rather than its own pitch.</td></tr>
+      <tr><td>Engine + hot-updatable connector definitions (uBlock/EasyList)</td><td>Verifier flagged TLS-fingerprint vs IP-reputation conflation, and yt-dlp cited as "survival precedent" while grounding shows it's currently breaking (issue #16607). Good release-strategy seed but premature as a v1 idea.</td></tr>
+      <tr><td>Telegram-as-ingestion-bus</td><td>Load-bearing premise ("niche channels repost all TikTok/IG/X daily") was tagged direct: but is not in the research — an unverified behavioral assumption. Survives only as a weighting hint inside idea 3.</td></tr>
+      <tr><td>Slow research: 48h freshness floor</td><td>The 48h number and "early counts are bot-inflated" are bare assertions with no citation, and it directly contradicts idea 6 (which needs early velocity as its tripwire). Kept only as an open question on freshness policy.</td></tr>
+      <tr><td>Niche packs, not platform connectors</td><td>"Ranked by niche" mischaracterizes the research (ranked by signal-per-dollar, niche is a per-item tag) and folds HN — an existing connector — into a "missed sources" pack. Good packaging/README advice, not a distinct idea.</td></tr>
+      <tr><td>Forum signals as native reactions (BHW/Skool)</td><td>Footnote to idea 7 (same two sources, no new mechanism); doesn't clear the meeting-test standalone.</td></tr>
+      <tr><td>Corpus daemon (standalone)</td><td>Strong idea, but it's the enabling substrate for ideas 4/5/6 (they all need history) rather than a competing direction — noted as the architectural prerequisite instead of a separate card.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="composition-signal">Composed 2026-07-15 by ce-ideate · elsewhere-software mode · 5-agent ideation fleet + fresh-context basis verification · 48 raw → 16 merged → 7 survivors</footer>
+
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171c22; --fg:#dce3ea; --muted:#8a97a6; --accent:#5aa2ff; --border:#2a323b;
+    --free-fill:#12251a; --free-stroke:#3fae6e; --paid-fill:#25201a; --paid-stroke:#d4913f;
+    --node-fill:#1c2530; --node-stroke:#4a5866; --edge-overlap:#5aa2ff; --edge-fwd:#d4913f;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#ffffff; --panel:#f5f7fa; --fg:#1a2027; --muted:#5c6772; --accent:#1f6feb; --border:#dfe4ea;
+      --free-fill:#e7f6ec; --free-stroke:#2f9e5f; --paid-fill:#fbf0e2; --paid-stroke:#b9781f;
+      --node-fill:#eef2f6; --node-stroke:#b7c2cd; --edge-overlap:#1f6feb; --edge-fwd:#b9781f; }
+  }
+  :root[data-theme="dark"]{ --bg:#0f1216; --panel:#171c22; --fg:#dce3ea; --muted:#8a97a6; --border:#2a323b;
+    --free-fill:#12251a; --free-stroke:#3fae6e; --paid-fill:#25201a; --paid-stroke:#d4913f; --node-fill:#1c2530; --node-stroke:#4a5866;}
+  :root[data-theme="light"]{ --bg:#ffffff; --panel:#f5f7fa; --fg:#1a2027; --muted:#5c6772; --border:#dfe4ea;
+    --free-fill:#e7f6ec; --free-stroke:#2f9e5f; --paid-fill:#fbf0e2; --paid-stroke:#b9781f; --node-fill:#eef2f6; --node-stroke:#b7c2cd;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  section,nav,footer{max-width:900px;margin:0 auto;padding:0 24px}
+  .doc-header{padding-top:40px}
+  .eyebrow{font:600 12px system-ui;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 4px}
+  h1{font-size:2rem;line-height:1.2;margin:.1em 0 .5em}
+  h2{font-size:1.4rem;margin:2em 0 .6em;padding-bottom:.3em;border-bottom:1px solid var(--border)}
+  h3{font-size:1.18rem;margin:0 0 .3em}
+  p{max-width:72ch}
+  .meta{display:grid;grid-template-columns:max-content 1fr;gap:2px 16px;margin:12px 0;font-size:.92rem}
+  .meta dt{color:var(--muted);font-weight:600}
+  .meta dd{margin:0}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 8px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:.85rem;color:var(--muted)}
+  .stat b{color:var(--fg)}
+  .jump{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 18px;margin:20px auto;font-size:.9rem;max-width:852px}
+  .jump b{display:block;margin-bottom:6px;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}
+  .jump a{display:inline-block;margin:3px 14px 3px 0;color:var(--accent);text-decoration:none}
+  .jump a:hover{text-decoration:underline}
+  .axes{margin:0;padding-left:1.2em}
+  .axes li{margin:.2em 0}
+  .idea{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:22px 26px;margin:20px 0}
+  .idnum{color:var(--accent);font-weight:700}
+  .axis-tag{color:var(--muted);font-size:.82rem;font-weight:600;letter-spacing:.03em;margin:.1em 0 1em;text-transform:uppercase}
+  .revised-note{background:var(--paid-fill);border-left:3px solid var(--paid-stroke);border-radius:0 6px 6px 0;padding:8px 14px;margin:.2em 0 1em;font-size:.86rem;color:var(--fg)}
+  .added{color:var(--paid-stroke);font-size:.8em;font-weight:600}
+  .idea p{margin:.5em 0}
+  .idea code{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:.08em .38em;font:.85em ui-monospace,SFMono-Regular,Menlo,monospace}
+  .meta-line{margin-top:1em;padding-top:.8em;border-top:1px solid var(--border);font-size:.9rem;color:var(--muted)}
+  .figure{margin:16px 0;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto}
+  .figure svg{display:block;width:100%;height:auto;min-width:520px}
+  table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.92rem}
+  th,td{border:1px solid var(--border);padding:9px 13px;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:600}
+  td{max-width:none}
+  .composition-signal{color:var(--muted);font-size:.82rem;border-top:1px solid var(--border);margin-top:40px;padding:20px 24px 60px;text-align:center}
+  a{color:var(--accent)}
+</style>

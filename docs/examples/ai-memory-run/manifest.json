@@ -1,0 +1,62 @@
+{
+  "topic": "state of AI memory: LLM agent memory and context engineering, July 2026",
+  "started": "2026-07-08T15:34:50",
+  "connectors_run": [
+    "gemini",
+    "grok",
+    "perplexity",
+    "hackernews",
+    "hiring",
+    "polymarket",
+    "github",
+    "reddit",
+    "bluesky"
+  ],
+  "connectors_skipped": {},
+  "channels": {
+    "bluesky": {
+      "status": "error",
+      "error": "HTTP 403"
+    },
+    "hackernews": {
+      "status": "ok",
+      "items_or_chars": 8,
+      "seconds": 0.6
+    },
+    "reddit": {
+      "status": "error",
+      "error": "HTTP 403"
+    },
+    "polymarket": {
+      "status": "ok",
+      "items_or_chars": 8,
+      "seconds": 0.9
+    },
+    "hiring": {
+      "status": "ok",
+      "items_or_chars": 7,
+      "seconds": 1.8
+    },
+    "github": {
+      "status": "ok",
+      "items_or_chars": 16,
+      "seconds": 2.5
+    },
+    "perplexity": {
+      "status": "ok",
+      "items_or_chars": 5814,
+      "seconds": 15.5
+    },
+    "gemini": {
+      "status": "ok",
+      "items_or_chars": 10706,
+      "seconds": 24.7
+    },
+    "grok": {
+      "status": "ok",
+      "items_or_chars": 10055,
+      "seconds": 39.6
+    }
+  },
+  "finished": "2026-07-08T15:35:30"
+}
