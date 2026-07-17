@@ -47,7 +47,7 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 11 connectors run
+3. **Pick channels + aim each one.** Decide which of the 13 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -122,7 +122,7 @@ Nik's rule (2026-07-08): **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 11 connectors
+## Architecture — 13 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -146,6 +146,8 @@ you — raw numbers, odds, velocity):
 | **github-issues** | issue + comment search (`gh`) | top issues by reactions + real comment excerpts — product/competitor evidence; `owner/repo` query scopes to one repo |
 | **reddit** | Arctic-Shift archive (free) | reaction-weighted posts — real score+comments, relevance-ranked *(search.json is dead; degrades to ERROR.md)* |
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
+| **launch-radar** | Show HN + yc-oss + DevHunt (+Product Hunt with free read token) | what's shipping — momentum-ranked launches (votes × recency decay × comments) + category velocity (saturation signal); YC entries are recency-only (no vote fields) |
+| **revenue-radar** | Flippa sold listings + Substack leaderboards (free) | what's selling — realized sale prices with profit multiples (Flippa→microsaas) + bestseller tiers verbatim, never invented revenue (Substack→infoproducts) |
 
 **Claude (this session)** — synthesis: reads the report files, writes
 `synthesis.md` (overlaps, contradictions, one-screen recommendation), then
@@ -311,6 +313,8 @@ A **complete skill-authored bundle** is self-contained:
 ├── github-issues.md      — top issues by reactions + comment excerpts
 ├── reddit.md             — top posts (or ERROR.md)
 ├── bluesky.md            — top posts (or ERROR.md)
+├── launch-radar.md       — what's shipping: momentum-ranked launches + category velocity
+├── revenue-radar.md      — what's selling: Flippa sold prices + Substack bestseller tiers
 ├── synthesis.md          — session: overlaps, contradictions, recommendation
 └── brief.html            — optional shareable dark-mode HTML (self-contained)
 ```

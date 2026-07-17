@@ -26,6 +26,10 @@ Two channel families run concurrently and write one markdown file each:
     - reddit      Arctic-Shift archive -> reaction-weighted posts (real
                   score+comments; reddit.com/search.json is dead)
     - bluesky     app.bsky searchPosts (best-effort)
+    - launch-radar   what's shipping: Show HN + yc-oss + DevHunt (+Product
+                  Hunt with a free read token) -> momentum + category velocity
+    - revenue-radar  what's selling: Flippa sold prices + Substack bestseller
+                  tiers (free; tiers rendered verbatim, never invented ARR)
 
 The deep-research skill owns the higher-level workflow: it reserves one
 project-local run with `--allocate-run`, writes `research-plan.md` before
@@ -90,6 +94,16 @@ from output_paths import (
     resolve_output_directory,
     resolve_project_root,
 )
+
+# Market-radar connector modules (R22/KTD7) live in the connectors/ package.
+# They reuse this module's HTTP + ranking helpers through a live-globals
+# injection: lookups happen per call, so tests that patch attributes on this
+# module are honored inside the connector modules too.
+import connectors as _market_radar_pkg
+from connectors.launch_radar import channel_launch_radar
+from connectors.revenue_radar import channel_revenue_radar
+
+_market_radar_pkg.attach_runner(globals())
 
 # Where per-provider key files live. Defaults to ~/.openclaw/secrets (the
 # author's setup) but is overridable so anyone can point it elsewhere — or
@@ -988,6 +1002,8 @@ CONNECTORS = {
         Connector("github-issues", "direct", channel_github_issues, "issues + comment evidence (free)", []),
         Connector("reddit", "direct", channel_reddit, "top posts via Arctic-Shift archive (free, score+comments)", []),
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
+        Connector("launch-radar", "direct", channel_launch_radar, "what's shipping: Show HN + yc-oss + DevHunt (+PH with token)", []),
+        Connector("revenue-radar", "direct", channel_revenue_radar, "what's selling: Flippa sold + Substack leaderboards (free)", []),
     ]
 }
 
@@ -1003,6 +1019,8 @@ OUTPUT_NAMES = {
     "github-issues": "github-issues.md",
     "reddit": "reddit.md",
     "bluesky": "bluesky.md",
+    "launch-radar": "launch-radar.md",
+    "revenue-radar": "revenue-radar.md",
 }
 
 
