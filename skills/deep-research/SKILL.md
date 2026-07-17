@@ -165,6 +165,85 @@ optionally renders a shareable `brief.html`.
 - Pure academic lit review — Scholar/arXiv/Semantic Scholar are better primaries.
 - Internal codes / private APIs — not in public sources.
 
+## Onboarding (first run) — the wizard IS the conversation
+
+There is no separate setup screen. The wizard is this dialogue, run once,
+and every upgrade must be earned by a real result shown first.
+
+**STEP 0 — read detected state.** A SessionStart hook (wired in the plugin
+root's `hooks/hooks.json`) injects JSON produced by `scripts/detect_state.py`:
+`{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq},
+telegram_session, profile, wizard_done, tier}`. If no hook context is present
+(Codex, Cursor, and other hosts without plugin hooks), run the detector
+yourself and parse its JSON — detection must be host-portable, not just the
+dialogue:
+```bash
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+python3 "$SKILL_DIR/scripts/detect_state.py"
+```
+If `wizard_done` is true → **skip onboarding entirely** (no repeat pitch,
+ever) and proceed with normal skill use.
+
+**STEP 1 — first question with the welcome INSIDE it.** Never send a
+standalone welcome message. Ask exactly one question whose text embeds the
+one-paragraph pitch — deep multi-source reaction-weighted research, $0 to
+start, zero keys needed — and whose options are the only decision. Use
+AskUserQuestion (modal) where available; the prose fallback below otherwise:
+- **Auto** — run the $0 proof right now.
+- **Manual** — let the user choose sources first, then run.
+- **Skip** — skip onboarding; write the STEP-4 marker with the current tier
+  and never pitch again.
+
+**STEP 2 — Tier-0 proof BEFORE any key ask.** Run the free connectors only —
+`--only hackernews,hiring,polymarket,github,reddit,bluesky` — on a topic the
+user gives (or offer one concrete demo topic). Use the normal STEP 0 flow
+above: allocate the run, write `research-plan.md`, run, then show the brief.
+**No paid-key prompt may appear before this real result exists.**
+
+**STEP 3 — one visible decision per tier.** Offer upgrades one at a time,
+always naming what is already unlocked free first. Never stack questions.
+- **Tier 1 — own Gemini/Grok keys**: grounded LLM lenses, YouTube reading
+  via Gemini.
+- **Tier 2 — one OpenRouter key**: routes all LLM lenses through a single key.
+- **Telegram** (opt-in, HARD WARNING gate): separate/secondary account only,
+  never the personal one; state the ban risk and the risk to personal DMs
+  plainly; require explicit acknowledgement of both before any session
+  capture starts.
+- **TikTok/IG**: pay-per-use vendor (ScrapeCreators), off by default; give an
+  honest per-run cost note before enabling.
+- **Meta Ad Library**: free but token-gated — needs the user's own token.
+
+Each accepted tier ends with a verification step that proves it works: a real
+one-connector segment run through the newly unlocked channel.
+
+**STEP 4 — verify + doctor.** Run one more real segment, then show state with
+no network call:
+```bash
+python3 "$SKILL_DIR/scripts/deep-research.py" --diagnose
+```
+Then write the onboarding marker `<secrets-dir>/onboarding.json` =
+`{"wizard_done": true, "tier": "<highest unlocked>"}`, where the secrets dir
+is `DEEP_RESEARCH_SECRETS_DIR` or `~/.openclaw/secrets`.
+
+**Demand signals — reachable from any tier.** If the user says they want the
+paid/hosted version:
+```bash
+python3 "$SKILL_DIR/scripts/deep-research.py" --signal want-paid
+# or: --signal host-for-me
+```
+This records the signal locally; it notifies Nik only when a notify target is
+configured, and the confirmation copy must say honestly which of the two
+happened. Never silently create accounts or mint anything.
+
+**Prose fallback (hosts without a modal ask).** Same flow, numbered options:
+```
+Deep multi-source research, $0 to start, zero keys. Pick one:
+  1. Auto — run the free proof now on a topic you name
+  2. Manual — choose sources first
+  3. Skip — no onboarding, never ask again
+```
+Wait for the number, then continue at the matching step above.
+
 ## How to run
 
 The complete workflow is the skill orchestration in STEP 0: allocation,
