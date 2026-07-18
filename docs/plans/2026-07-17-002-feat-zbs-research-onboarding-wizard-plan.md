@@ -25,7 +25,7 @@ execution: code
 
 ## Product Contract
 
-Product Contract preservation: R1–R21 carried from the requirements-only version (ce-brainstorm); R22 added (2026-07-17 — market-radar / product-launch source layer, per Nik) with KTD7, U12, U13. Changed by doc-review (2026-07-17): R2 — detection restated to share the runtime's actual key-resolution path (the brainstorm's fixed order did not match `read_key()` in code); R6/R7 — Meta Ad Library and YouTube re-tiered out of the zero-key floor (both require a token/key in practice; the zero-key promise must be true).
+Product Contract preservation: R1–R21 carried from the requirements-only version (ce-brainstorm); R22 added (2026-07-17 — market-radar / product-launch source layer, per Nik) with KTD7, U12, U13; R23 added (2026-07-18 — Threads search source, per Nik mid-implementation) with U15. Changed by doc-review (2026-07-17): R2 — detection restated to share the runtime's actual key-resolution path (the brainstorm's fixed order did not match `read_key()` in code); R6/R7 — Meta Ad Library and YouTube re-tiered out of the zero-key floor (both require a token/key in practice; the zero-key promise must be true).
 
 ### Primary actor & core outcome
 
@@ -51,6 +51,7 @@ Product Contract preservation: R1–R21 carried from the requirements-only versi
 - R10. **TikTok / Instagram** — optional, **pay-per-use** adapter (Apify or ScrapeCreators). Off by default.
 - R11. **GitHub issues + comments** as a first-class scored source.
 - R12. **LinkedIn de-prioritized** — not default (mostly reposts).
+- R23. **Threads source** (added 2026-07-18, per Nik): search Meta Threads posts as a discourse source. Research-verified reality (2026): no zero-key search exists — official `keyword_search` is free but token-gated (`THREADS_ACCESS_TOKEN`; Standard Access covers own posts only, public search needs Advanced Access App Review; 2,200 q/24h; no engagement counts on results); ScrapeCreators `/v1/threads/search` is the pay-per-use path with engagement counts (existing `scrapecreators` key). Free-first: official token preferred, vendor opt-in; no ToS-hostile scraping.
 - R22. **Market-radar source layer** — a distinct source class (not discourse): *launch-radar* (what's shipping: Product Hunt, Show HN, yc-oss, DevHunt, MicroLaunch) + *revenue/exit-radar* (what's selling/sold: Flippa, Substack leaderboards, Whop Trends, Gumtrends). Ranked by **launch-momentum + category-velocity**, not raw votes. Free-first (Show HN already covered, yc-oss/Flippa-sold/Substack/PH-token/DevHunt); revenue datasets opt-in pay-per-use. Skips gameable AI-directories (TAAFT/Futurepedia). AI-consulting has no good launch source — explicit gap.
 
 **Demand signals**
@@ -183,6 +184,7 @@ Grouped in 3 phases. Phase A first (wizard + Tier-0 + demand = first wow and the
 | U12 | Launch-radar connectors | `skills/deep-research/scripts/connectors/launch_radar.py` | U10 (soft) |
 | U13 | Revenue/exit-radar connectors | `skills/deep-research/scripts/connectors/revenue_radar.py` | — |
 | U14 | Reddit → Arctic-Shift migration | `skills/deep-research/scripts/deep-research.py` | U10 (soft) |
+| U15 | Threads connector (token/vendor) | `skills/deep-research/scripts/connectors/threads.py` | U10 (soft) |
 | U8 | Meta Ad Library connector | `skills/deep-research/scripts/connectors/meta_ads.py` | — |
 | U9 | Pluggable media backend | `skills/deep-research/scripts/media_backend.py` | — |
 | U10 | Ranking upgrade | `skills/deep-research/scripts/deep-research.py` | — |
@@ -308,6 +310,18 @@ Grouped in 3 phases. Phase A first (wizard + Tier-0 + demand = first wow and the
 - **Test scenarios:** Happy: mocked Arctic-Shift response → posts ranked with scores + comment excerpts. Edge: empty result → honest empty. Error: rate-limit/5xx → ERROR.md, siblings continue. Fallback: score fields absent → documented degradation note in output, no crash. Windows: no POSIX-only calls.
 - **Verification:** Live score-field probe documented; the Tier-0 dry-run includes real Reddit results via Arctic-Shift.
 
+### U15. Threads connector (token-gated official API / pay-per-use vendor)
+
+- **Goal:** Search Meta Threads posts by keyword as a discourse source — the platform Nik finds high-signal but LLM lenses search poorly.
+- **Requirements:** R23
+- **Dependencies:** U10 (soft — ranking helper for vendor path with engagement counts)
+- **Files:** `skills/deep-research/scripts/connectors/threads.py` (new), `skills/deep-research/scripts/deep-research.py` (KEYS `threads` + register), `skills/deep-research/scripts/detect_state.py` (add threads provider), `skills/deep-research/SKILL.md` (tier copy + output layout), `skills/deep-research/tests/test_threads.py` (new)
+- **Approach:** Free-first dual path. Official: `GET graph.threads.net/v1.0/keyword_search` with `THREADS_ACCESS_TOKEN` (q, search_type=TOP|RECENT, since/until as Unix timestamps, limit≤100; no cursor assumptions); results carry no engagement counts — rank by relevance+recency with an honest note; empty results with a valid token get a "Standard Access searches only your own posts — Advanced Access (App Review) unlocks public search" hint. Vendor: ScrapeCreators `/v1/threads/search` (`x-api-key`, existing key; ~10 posts/request WITH engagement counts) — used when the official token is absent, or forced via `DEEP_RESEARCH_THREADS_VENDOR=scrapecreators`; ranked via `rank_items`; honest cost note. Availability: `requires=["threads"]` with `fallback_key="scrapecreators"` (existing OR-semantics from U4). No scraping paths (crawler-UA spoofing is ToS-hostile — research-verified).
+- **Execution note:** Endpoint shapes are research-verified against live docs (2026-07-18, adversarial re-fetch). Mocked request-shape tests only; no live token calls in tests.
+- **Patterns:** meta_ads.py (token-gated connector), tiktok_ig.py (scrapecreators vendor shape), U4 fallback_key semantics.
+- **Test scenarios:** Official path: token set → request to graph.threads.net keyword_search with q/search_type/limit params, results rendered with no-engagement note; empty result + token → Advanced Access hint. Vendor path: no threads token + scrapecreators key → api.scrapecreators.com request with x-api-key, posts ranked by engagement, cost note present. Precedence: both keys → official free path wins; env override forces vendor. Neither key → connector skipped, recorded in manifest. Error: HTTP 429/5xx → ERROR.md, siblings continue. Sensitive-keyword empty array → honest empty. Windows-safe scan.
+- **Verification:** Request-shape tests pass; `--list-connectors` shows threads with OR-key semantics; SKILL.md tier copy mentions App Review reality honestly.
+
 **Phase C — Profiles, ranking quality, differentiation hardening**
 
 ### U8. Meta Ad Library connector (money signal, free with token)
@@ -356,7 +370,7 @@ Grouped in 3 phases. Phase A first (wizard + Tier-0 + demand = first wow and the
 
 ## Verification Contract
 
-- **Unit tests** for U1, U3, U4, U5, U6, U7, U8, U9, U10, U12, U13, U14 pass (`skills/deep-research/tests/` — the existing selftest `unittest discover` root; repo-root `tests/` is NOT discovered), including request-shape assertions for cloud/OpenRouter (mocked, no live spend).
+- **Unit tests** for U1, U3, U4, U5, U6, U7, U8, U9, U10, U12, U13, U14, U15 pass (`skills/deep-research/tests/` — the existing selftest `unittest discover` root; repo-root `tests/` is NOT discovered), including request-shape assertions for cloud/OpenRouter (mocked, no live spend).
 - **selftest.sh** extended: `--list-connectors` shows new connectors; Tier-0 wizard dry-run produces a brief with zero keys; banned-POSIX grep clean; `claude plugin validate` exits 0; secret-scan clean; brief HTML self-contained.
 - **Live smokes (documented, minimal spend, run BEFORE the dependent unit is built):** one OpenRouter call per provider asserting grounding evidence (metadata/citations — a 200 with the tool silently dropped fails the smoke); Arctic-Shift score-field probe (U14); Meta Ad Library EU query (with token); Product Hunt free-read token + Show HN filter; Flippa sold-page + Substack leaderboard (both free).
 - **Market-radar (U12/U13):** launch-momentum + category-velocity computed on a fixture; revenue sources rank by revenue not votes; Tier-0 launch/revenue sources work with zero keys.
@@ -377,4 +391,5 @@ Grouped in 3 phases. Phase A first (wizard + Tier-0 + demand = first wow and the
 - Ranking fixture shows on-topic beating off-topic-viral (R21).
 - Arctic-Shift score-field assumption confirmed (U14 probe) or its fallback documented; Tier-0 Reddit runs on Arctic-Shift, not the dead `.json` path.
 - Market-radar layer live (R22): launch-radar (Show HN + yc-oss zero-key, PH with token) + revenue-radar (Flippa + Substack zero-key) return ranked results; paid sources (Whop/Gumtrends) opt-in only.
+- Threads source live (R23): official keyword_search with token (honest no-engagement + Advanced-Access notes) or ScrapeCreators vendor path with engagement ranking; skipped cleanly with neither key.
 - Abandoned-attempt code from dead-end approaches is removed before declaring done.
