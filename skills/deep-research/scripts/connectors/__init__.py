@@ -29,6 +29,20 @@ def excerpt(text, limit=240):
     return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
+def first(*values):
+    """First value that is neither None nor empty-string, else None."""
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def subdict(raw, key):
+    """raw[key] when it is a dict, else an empty dict."""
+    value = raw.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def attach_runner(runner_globals):
     """Register the live globals dict of the deep-research runner module."""
     global _RUNNER_GLOBALS

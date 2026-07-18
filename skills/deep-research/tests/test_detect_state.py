@@ -163,6 +163,33 @@ class DetectStateTests(unittest.TestCase):
         self.assertNotIn(env_secret, combined)
         self.assertNotIn(file_secret, combined)
 
+    def test_non_utf8_key_file_degrades_to_absent_state_no_crash(self):
+        # The SessionStart hook must never crash the session. A non-UTF-8
+        # *-key.txt (read_key does a plain read_text) would otherwise raise
+        # UnicodeDecodeError; main() catches it and emits the absent shape.
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp).resolve()
+            (secrets / "gemini-key.txt").write_bytes(b"\xff\xfe\x00\x80not-utf8")
+
+            env = os.environ.copy()
+            for name in STATE_ENV_VARS:
+                env.pop(name, None)
+            env["DEEP_RESEARCH_SECRETS_DIR"] = str(secrets)
+
+            result = subprocess.run(
+                [sys.executable, str(DETECT)],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(result.stdout)
+        self.assertFalse(any(state["providers"].values()))
+        self.assertFalse(state["wizard_done"])
+        self.assertEqual(state["profile"], "client")
+
     def test_detector_source_avoids_posix_only_calls(self):
         source = DETECT.read_text(encoding="utf-8")
         for token in ("SIGALRM", "killpg", "fcntl", "os.fork", "setsid", "pwd.", "grp."):

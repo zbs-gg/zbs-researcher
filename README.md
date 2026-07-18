@@ -44,6 +44,7 @@ bill Anthropic or OpenAI APIs by default**.
 | meta-ads | direct | free Meta token | who's paying to advertise — Meta Ad Library (EU scope) |
 | telegram | direct | *(opt-in)* own Telegram app creds + session | channel posts + discussion comments — separate research account only |
 | tiktok-ig | direct | *(opt-in)* pay-per-use vendor key | TikTok/IG posts + comments — every run costs vendor credits |
+| threads | direct | *(key-gated)* free official token or pay-per-use vendor | Threads posts by keyword — official keeps Meta's TOP order, vendor adds engagement counts |
 
 Free direct channels are zero-config; one OpenRouter key (Tier 2) can drive
 all three default LLM lenses at once. LLM channels activate when their key is

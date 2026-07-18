@@ -112,7 +112,11 @@ RUN_DIR="$(cd "$OUT" && python3 "$SCRIPT" "$TOPIC" \
 topic_marker="$(<"$RUN_DIR/_topic.txt")"
 test "$topic_marker" = "$TOPIC"
 printf '# Selftest research plan\n' > "$RUN_DIR/research-plan.md"
-env -u GEMINI_API_KEY DEEP_RESEARCH_SECRETS_DIR="$SECRETS" \
+# Unset OPENROUTER_API_KEY too: gemini now declares fallback_key="openrouter",
+# so a host/CI exporting it would route --only gemini to a live billed
+# OpenRouter call — silently, while the test still "passes". Keeping the step
+# key-free preserves the "calls NO paid APIs" contract (R17 budget invariant).
+env -u GEMINI_API_KEY -u OPENROUTER_API_KEY DEEP_RESEARCH_SECRETS_DIR="$SECRETS" \
     python3 "$SCRIPT" "$TOPIC" --output-dir "$RUN_DIR" \
     --prepared-run --launch-cwd "$PROJECT" --only gemini >/dev/null 2>&1
 test -s "$RUN_DIR/research-plan.md"
@@ -160,7 +164,7 @@ echo "5/10 secret scan — no key material in tracked source…"
 # Real key bodies are long runs of [A-Za-z0-9_-] right after the provider
 # prefix; the read_key() regex literals in source put a "[" there instead,
 # so they can never match. Any hit below is a leaked (or planted) key.
-if grep -rnE '(sk-or-|xai-|gsk_|pplx-)[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{30,}' \
+if grep -rnE '(sk-or-|xai-|gsk_|pplx-)[A-Za-z0-9_-]{20,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{30,}|[0-9]{6,}\|[A-Za-z0-9_-]{20,}' \
     --exclude-dir=__pycache__ \
     "$ROOT/skills" "$ROOT/hooks" "$ROOT/.claude-plugin"; then
     echo "   FAIL: key-material pattern found in tracked source"; exit 1

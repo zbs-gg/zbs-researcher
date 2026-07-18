@@ -1079,7 +1079,7 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock):
             manifest["channels"][conn.name] = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
         print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode()[:800]
+        detail = e.read().decode("utf-8", "replace")[:800]
         out_path.with_suffix(".ERROR.md").write_text(f"HTTP {e.code}\n{detail}")
         with lock:
             manifest["channels"][conn.name] = {"status": "error", "error": f"HTTP {e.code}"}

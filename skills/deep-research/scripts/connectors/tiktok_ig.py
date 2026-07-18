@@ -30,7 +30,9 @@ import urllib.request
 from pathlib import Path
 
 from . import excerpt as _excerpt
+from . import first as _first
 from . import runner
+from . import subdict as _subdict
 
 SC_BASE = "https://api.scrapecreators.com"
 VENDOR_ENV = "DEEP_RESEARCH_TIKTOK_VENDOR"
@@ -77,13 +79,6 @@ def _quota_guard(exc, vendor):
             "exhausted or payment required. Each run costs vendor credits; "
             "top up the vendor balance or reduce scope before retrying."
         ) from exc
-
-
-def _first(*values):
-    for value in values:
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _to_int(value):

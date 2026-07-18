@@ -41,7 +41,9 @@ import urllib.error
 import urllib.parse
 
 from . import excerpt as _excerpt
+from . import first as _first
 from . import runner
+from . import subdict as _subdict
 
 OFFICIAL_URL = "https://graph.threads.net/v1.0/keyword_search"
 SC_URL = "https://api.scrapecreators.com/v1/threads/search"
@@ -197,23 +199,11 @@ def _render_official(query, posts):
 # ---------------------------------------------------------------------------
 # ScrapeCreators vendor path
 # ---------------------------------------------------------------------------
-def _first(*values):
-    for value in values:
-        if value not in (None, ""):
-            return value
-    return None
-
-
 def _to_int(value):
     try:
         return int(float(value))
     except (TypeError, ValueError):
         return 0
-
-
-def _subdict(raw, key):
-    value = raw.get(key)
-    return value if isinstance(value, dict) else {}
 
 
 def _extract_vendor_items(data):

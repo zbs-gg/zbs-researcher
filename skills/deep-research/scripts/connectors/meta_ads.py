@@ -31,6 +31,7 @@ Helpers (get_json / KEYS) resolve through the runner's live globals — see
 connectors/__init__.py.
 """
 import calendar
+import io
 import math
 import time
 import urllib.error
@@ -38,6 +39,15 @@ import urllib.parse
 
 from . import now as _now  # module-level binding so tests can freeze time
 from . import runner
+
+_REDACTED = "***"
+
+
+def _redact(value, token):
+    """Strip the access token from any string before it can be surfaced."""
+    if not token:
+        return value
+    return str(value or "").replace(token, _REDACTED)
 
 AD_LIBRARY_URL = "https://graph.facebook.com/v21.0/ads_archive"
 # EU default (R6): full commercial detail is EU-only under the DSA.
@@ -112,7 +122,18 @@ def _fetch_ads(query, token, pool):
         if e.code == 400 and ("oauth" in detail.lower()
                               or "access token" in detail.lower()):
             raise RuntimeError(_TOKEN_GUIDANCE) from e
-        raise  # rate limits and everything else propagate untouched
+        # Re-raise a fresh HTTPError carrying the already-read body (the
+        # original fp is exhausted, so run_connector's second read would get
+        # empty bytes and write a blank ERROR.md) and with the token scrubbed
+        # from the url + reason so it never surfaces. `from None` drops the
+        # original so no traceback context carries the raw token-bearing url.
+        raise urllib.error.HTTPError(
+            _redact(getattr(e, "filename", "") or url, token),
+            e.code,
+            _redact(e.reason, token),
+            e.headers,
+            io.BytesIO(detail.encode("utf-8", "replace")),
+        ) from None
     return data.get("data") or []
 
 

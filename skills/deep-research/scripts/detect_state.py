@@ -28,13 +28,9 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent
 RUNNER_PATH = SCRIPTS_DIR / "deep-research.py"
 
-# Providers surfaced to the agent. Names missing from the runner's KEYS dict
-# are resolved with the runner's own read_key() using these extra specs.
+# Providers surfaced to the agent. Every name here is a key in the runner's
+# KEYS dict, so bool(KEYS[name]) is the authoritative configured/absent signal.
 PROVIDERS = ("gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq", "threads")
-EXTRA_KEY_SPECS = {
-    "openrouter": (["openrouter-key.txt"], r"sk-or-[A-Za-z0-9_\-]+", "OPENROUTER_API_KEY"),
-    "groq": (["groq-key.txt"], r"gsk_[A-Za-z0-9_\-]+", "GROQ_API_KEY"),
-}
 ONBOARDING_MARKER = "onboarding.json"
 
 
@@ -76,13 +72,7 @@ def _read_onboarding_marker(path):
 def collect_state(runner=None):
     """Compute the session-state dict from the CURRENT environment."""
     runner = runner if runner is not None else _load_runner()
-    providers = {}
-    for name in PROVIDERS:
-        key = runner.KEYS.get(name)
-        if key is None:
-            filenames, pattern, env_var = EXTRA_KEY_SPECS[name]
-            key = runner.read_key(filenames, pattern, env_var)
-        providers[name] = bool(key)
+    providers = {name: bool(runner.KEYS.get(name)) for name in PROVIDERS}
     secrets = runner.SECRETS
     telegram_session = bool(secrets.is_dir() and any(secrets.glob("*.session")))
     wizard_done, tier = _read_onboarding_marker(secrets / ONBOARDING_MARKER)
@@ -118,8 +108,26 @@ def doctor_report():
     return "\n".join(lines)
 
 
+def _absent_state():
+    """The documented all-absent shape — the safe fallback when state can't
+    be computed (e.g. an undecodable key file). A SessionStart hook must never
+    crash the session; emitting 'nothing configured' degrades to the wizard
+    asking, which is correct."""
+    return {
+        "providers": {name: False for name in PROVIDERS},
+        "telegram_session": False,
+        "profile": os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client",
+        "wizard_done": False,
+        "tier": None,
+    }
+
+
 def main():
-    print(json.dumps(collect_state()))
+    try:
+        state = collect_state()
+    except Exception:  # noqa: BLE001 — the hook must degrade, never crash the session
+        state = _absent_state()
+    print(json.dumps(state))
 
 
 if __name__ == "__main__":

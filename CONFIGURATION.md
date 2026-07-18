@@ -46,6 +46,7 @@ under `connectors_skipped` — the run continues with whatever is available.
 | launch-radar (PH slice) | `PRODUCTHUNT_TOKEN` | optional free read token; the other three sources need nothing |
 | telegram | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` | off by default; needs a Telethon `*.session` in the secrets dir; see the security section below |
 | tiktok-ig | `SCRAPECREATORS_KEY` (or `DEEP_RESEARCH_TIKTOK_VENDOR=apify` + `APIFY_TOKEN`) | off by default; pay-per-use vendor — every run costs credits |
+| threads | `THREADS_ACCESS_TOKEN` (official, free) or `SCRAPECREATORS_KEY` (vendor); `DEEP_RESEARCH_THREADS_VENDOR=scrapecreators` forces the vendor path | key-gated; official path is free (Standard Access = own posts only), vendor path is pay-per-use |
 | media backend (used by tiktok-ig) | `GROQ_API_KEY` (audio), `GEMINI_API_KEY` (vision) — or `DEEP_RESEARCH_PROFILE=self` for local MLX | client profile is cloud-cheap; self profile is $0 local |
 
 ## Key files instead of env vars
@@ -60,7 +61,8 @@ export DEEP_RESEARCH_SECRETS_DIR=~/.config/deep-research/secrets
 File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
 (or `openai-key.txt` / `openai.txt`), `perplexity-key.txt`,
 `openrouter-key.txt`, `groq-key.txt`, `meta-ads-token.txt`,
-`producthunt-token.txt`, `scrapecreators-key.txt`, `telegram-api-id.txt`,
+`producthunt-token.txt`, `scrapecreators-key.txt`, `threads-access-token.txt`,
+`telegram-api-id.txt`,
 `telegram-api-hash.txt`. Each file may hold the bare key or a `KEY = value`
 line — the first match wins. Env vars take over when no file is found.
 
@@ -106,6 +108,7 @@ into research output.
 | meta-ads | `graph.facebook.com` (Ad Library, EU scope) | query text + your token | `META_ADS_TOKEN` / `meta-ads-token.txt` | on, auto-skipped without token |
 | telegram | Telegram MTProto via a Telethon client session | channel search terms + channel reads, authenticated as the research account | `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` + `*.session` in the secrets dir; runtime ack `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` | **off — double opt-in** |
 | tiktok-ig | `api.scrapecreators.com` or `api.apify.com` | query text | `SCRAPECREATORS_KEY` or `APIFY_TOKEN` (vendor via `DEEP_RESEARCH_TIKTOK_VENDOR`) | **off — opt-in, pay-per-use** |
+| threads | `graph.threads.net` (official) or `api.scrapecreators.com` (vendor) | query text + your token (official token is redacted from every error path, never rendered) | `THREADS_ACCESS_TOKEN` / `threads-access-token.txt`, or `SCRAPECREATORS_KEY` for the vendor path | key-gated; official free / vendor pay-per-use |
 
 Non-connector components:
 

@@ -227,7 +227,10 @@ always naming what is already unlocked free first. Never stack questions.
   honest per-run cost note before enabling. Vendor is selectable with
   `DEEP_RESEARCH_TIKTOK_VENDOR` (`scrapecreators` default; `apify` needs
   `APIFY_TOKEN`); run it with `--only tiktok-ig` — every run costs vendor
-  credits and the report header says so.
+  credits and the report header says so. Video transcription uses the media
+  backend: the default `client` profile needs `GROQ_API_KEY` + `GEMINI_API_KEY`
+  (cloud, cents), while `DEEP_RESEARCH_PROFILE=self` runs local MLX Whisper at
+  $0 (Mac-bound) — name the free local option, not just the paid keys.
 - **Threads**: two honest routes, pick one. Token-gated official API — free,
   2,200 queries/day, but Standard Access searches only your own posts
   (Advanced Access via App Review, ~1–2 weeks, unlocks public search) and
