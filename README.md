@@ -5,7 +5,7 @@ triangulates a topic across reasoning-model lenses **and** raw platform
 signal, then synthesizes the contradictions — not just the top-ranked
 summary.
 
-Unlike a single web search, it pulls in parallel from up to **16 connectors**
+Unlike a single web search, it pulls in parallel from up to **17 connectors**
 and, crucially, **produces a research plan before it runs** and **does not
 bill Anthropic or OpenAI APIs by default**.
 

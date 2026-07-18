@@ -310,9 +310,9 @@ class OpenRouterAvailabilityTests(unittest.TestCase):
         self.assertIn("perplexity", live_names)
         self.assertNotIn("openai", live_names)  # not default, and R17
         # every LLM lens runs; only token-gated direct connectors (meta-ads,
-        # no token in patched_keys) may remain skipped
+        # threads — no tokens in patched_keys) may remain skipped
         self.assertEqual([c.name for c in skipped if c.kind == "llm"], [])
-        self.assertEqual([c.name for c in skipped], ["meta-ads"])
+        self.assertEqual([c.name for c in skipped], ["meta-ads", "threads"])
 
     def test_list_connectors_reflects_openrouter_availability(self):
         buf = io.StringIO()

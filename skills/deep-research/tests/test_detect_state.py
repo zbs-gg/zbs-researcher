@@ -43,6 +43,7 @@ STATE_ENV_VARS = (
     "BRAVE_API_KEY",
     "OPENROUTER_API_KEY",
     "GROQ_API_KEY",
+    "THREADS_ACCESS_TOKEN",
     "DEEP_RESEARCH_PROFILE",
 )
 
@@ -72,6 +73,7 @@ class DetectStateTests(unittest.TestCase):
                     "openrouter": False,
                     "scrapecreators": False,
                     "groq": False,
+                    "threads": False,
                 },
                 "telegram_session": False,
                 "profile": "client",

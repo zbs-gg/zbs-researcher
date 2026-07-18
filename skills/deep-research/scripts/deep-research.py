@@ -37,6 +37,10 @@ Two channel families run concurrently and write one markdown file each:
                   Telethon is an optional lazy import, never a hard dep)
     - tiktok-ig   TikTok/IG posts + comments via a pay-per-use vendor
                   (OPT-IN + key-gated; every run costs vendor credits)
+    - threads     Threads posts by keyword — official keyword_search with a
+                  Threads token (free; Meta TOP order, no engagement counts;
+                  Standard Access = own posts only until App Review) or the
+                  ScrapeCreators vendor (pay-per-use, engagement-ranked)
 
 The deep-research skill owns the higher-level workflow: it reserves one
 project-local run with `--allocate-run`, writes `research-plan.md` before
@@ -113,6 +117,7 @@ from connectors.launch_radar import channel_launch_radar
 from connectors.meta_ads import channel_meta_ads
 from connectors.revenue_radar import channel_revenue_radar
 from connectors.telegram import channel_telegram
+from connectors.threads import channel_threads
 from connectors.tiktok_ig import channel_tiktok_ig
 
 _market_radar_pkg.attach_runner(globals())
@@ -176,6 +181,10 @@ KEYS = {
     # requires=["meta_ads"] select_connectors auto-skips when absent and the
     # manifest records the missing key (the honest degrade).
     "meta_ads": read_key(["meta-ads-token.txt"], r"[A-Za-z0-9|]{20,}", "META_ADS_TOKEN"),
+    # Threads (R23): official keyword_search token. Optional — the threads
+    # connector declares fallback_key="scrapecreators", so either credential
+    # keeps it available; without both, select_connectors skips it honestly.
+    "threads": read_key(["threads-access-token.txt"], r"[A-Za-z0-9_\-]{20,}", "THREADS_ACCESS_TOKEN"),
 }
 
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -1029,6 +1038,10 @@ CONNECTORS = {
         # tiktok-ig is OFF by default AND key-gated (R10): pay-per-use vendor,
         # every run costs credits. Opt in with --only tiktok-ig.
         Connector("tiktok-ig", "direct", channel_tiktok_ig, "TikTok/IG posts+comments via pay-per-use vendor (opt-in)", ["scrapecreators"], default=False),
+        # threads (R23): official token preferred (free, Meta TOP order, no
+        # engagement counts); fallback_key keeps it available with ONLY the
+        # ScrapeCreators key — the channel then routes to the vendor path.
+        Connector("threads", "direct", channel_threads, "Threads posts by keyword (official token or ScrapeCreators)", ["threads"], fallback_key="scrapecreators"),
     ]
 }
 
@@ -1049,6 +1062,7 @@ OUTPUT_NAMES = {
     "meta-ads": "meta-ads.md",
     "telegram": "telegram.md",
     "tiktok-ig": "tiktok-ig.md",
+    "threads": "threads.md",
 }
 
 

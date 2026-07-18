@@ -47,7 +47,7 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 16 connectors run
+3. **Pick channels + aim each one.** Decide which of the 17 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -122,7 +122,7 @@ Nik's rule (2026-07-08): **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 16 connectors
+## Architecture — 17 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -151,6 +151,7 @@ odds, velocity; free and zero-config except the last three gated ones):
 | **meta-ads** | Meta Ad Library, EU scope (free token; auto-skipped without one) | who's PAYING to advertise the topic — active ads, advertisers, durations |
 | **telegram** *(opt-in, off by default)* | Telegram client session (Telethon; separate research account only, ack-gated) | channel posts + discussion comments — views, reactions, real subscriber voice |
 | **tiktok-ig** *(opt-in, off by default)* | pay-per-use vendor (ScrapeCreators or Apify) | TikTok/IG posts + comments — every run costs vendor credits, the report says so |
+| **threads** *(key-gated)* | official Threads keyword_search (free token) or ScrapeCreators (pay-per-use) | Threads posts by keyword — official path keeps Meta's TOP order (no engagement counts; Standard Access = own posts only until App Review); vendor path adds like/reply counts, 1 credit/request |
 
 **Claude (this session)** — synthesis: reads the report files, writes
 `synthesis.md` (overlaps, contradictions, one-screen recommendation), then
@@ -178,8 +179,8 @@ and every upgrade must be earned by a real result shown first.
 
 **STEP 0 — read detected state.** A SessionStart hook (wired in the plugin
 root's `hooks/hooks.json`) injects JSON produced by `scripts/detect_state.py`:
-`{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq},
-telegram_session, profile, wizard_done, tier}`. If no hook context is present
+`{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq,
+threads}, telegram_session, profile, wizard_done, tier}`. If no hook context is present
 (Codex, Cursor, and other hosts without plugin hooks), run the detector
 yourself and parse its JSON — detection must be host-portable, not just the
 dialogue:
@@ -227,6 +228,14 @@ always naming what is already unlocked free first. Never stack questions.
   `DEEP_RESEARCH_TIKTOK_VENDOR` (`scrapecreators` default; `apify` needs
   `APIFY_TOKEN`); run it with `--only tiktok-ig` — every run costs vendor
   credits and the report header says so.
+- **Threads**: two honest routes, pick one. Token-gated official API — free,
+  2,200 queries/day, but Standard Access searches only your own posts
+  (Advanced Access via App Review, ~1–2 weeks, unlocks public search) and
+  results carry no engagement counts. OR instant pay-per-use via
+  ScrapeCreators (engagement counts included, 1 credit/request, ~10 posts).
+  With only a ScrapeCreators key the connector routes to the vendor
+  automatically; `DEEP_RESEARCH_THREADS_VENDOR=scrapecreators` forces it
+  even when a token exists.
 - **Meta Ad Library**: free but token-gated — needs the user's own token.
 
 Each accepted tier ends with a verification step that proves it works: a real
@@ -330,6 +339,7 @@ A **complete skill-authored bundle** is self-contained:
 ├── revenue-radar.md      — what's selling: Flippa sold prices + Substack bestseller tiers
 ├── telegram.md           — Telegram channel posts + comments (opt-in, ack-gated)
 ├── tiktok-ig.md          — TikTok/IG posts + comments (opt-in, pay-per-use)
+├── threads.md            — Threads posts by keyword (official token or ScrapeCreators)
 ├── synthesis.md          — session: overlaps, contradictions, recommendation
 └── brief.html            — optional shareable dark-mode HTML (self-contained)
 ```

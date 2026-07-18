@@ -7,7 +7,7 @@ whether the onboarding wizard already ran:
 
     {"providers": {"gemini": false, "grok": false, "perplexity": false,
                    "openrouter": false, "scrapecreators": false,
-                   "groq": false},
+                   "groq": false, "threads": false},
      "telegram_session": false, "profile": "client",
      "wizard_done": false, "tier": null}
 
@@ -30,7 +30,7 @@ RUNNER_PATH = SCRIPTS_DIR / "deep-research.py"
 
 # Providers surfaced to the agent. Names missing from the runner's KEYS dict
 # are resolved with the runner's own read_key() using these extra specs.
-PROVIDERS = ("gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq")
+PROVIDERS = ("gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq", "threads")
 EXTRA_KEY_SPECS = {
     "openrouter": (["openrouter-key.txt"], r"sk-or-[A-Za-z0-9_\-]+", "OPENROUTER_API_KEY"),
     "groq": (["groq-key.txt"], r"gsk_[A-Za-z0-9_\-]+", "GROQ_API_KEY"),
