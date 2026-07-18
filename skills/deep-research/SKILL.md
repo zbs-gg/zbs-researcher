@@ -47,7 +47,7 @@ starts. This is the rule Nik set on 2026-07-08: *"когда вызываешь 
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 10 connectors run
+3. **Pick channels + aim each one.** Decide which of the 17 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -122,7 +122,7 @@ Nik's rule (2026-07-08): **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 10 connectors
+## Architecture — 17 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -134,17 +134,24 @@ live web access):
 | **perplexity** (Sonar) | web + news, citation-first | Web/social lens; forces per-claim attribution | on |
 | **openai** (gpt-5.4 non-Pro) | Reddit + HN + GitHub + blogs (`web_search`) | GPT lens; **bills OpenAI API** | **opt-in** |
 
-**Direct channels** (zero-config, free; STRUCTURAL signal an LLM won't hand
-you — raw numbers, odds, velocity):
+**Direct channels** (STRUCTURAL signal an LLM won't hand you — raw numbers,
+odds, velocity; free and zero-config except the last three gated ones):
 
 | Channel | Source | Gives you |
 |---|---|---|
 | **hackernews** | HN Algolia | stories ranked by points/comments |
 | **hiring** | HN "Who is hiring?" | job-market hotness — how many postings mention the topic + which companies (RAG/agents/context-eng spikes) |
 | **polymarket** | Gamma `/public-search` | real-money odds on the topic (implied %) |
-| **github** | repo + issue search (`gh`) | stars, push recency, top issues/PRs |
-| **reddit** | search.json | top posts by upvotes *(best-effort — Reddit throttles unauth JSON; degrades to ERROR.md)* |
+| **github** | repo search (`gh`) | stars, push recency |
+| **github-issues** | issue + comment search (`gh`) | top issues by reactions + real comment excerpts — product/competitor evidence; `owner/repo` query scopes to one repo |
+| **reddit** | Arctic-Shift archive (free) | reaction-weighted posts — real score+comments, relevance-ranked *(search.json is dead; degrades to ERROR.md)* |
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
+| **launch-radar** | Show HN + yc-oss + DevHunt (+Product Hunt with free read token) | what's shipping — momentum-ranked launches (votes × recency decay × comments) + category velocity (saturation signal); YC entries are recency-only (no vote fields) |
+| **revenue-radar** | Flippa sold listings + Substack leaderboards (free) | what's selling — realized sale prices with profit multiples (Flippa→microsaas) + bestseller tiers verbatim, never invented revenue (Substack→infoproducts) |
+| **meta-ads** | Meta Ad Library, EU scope (free token; auto-skipped without one) | who's PAYING to advertise the topic — active ads, advertisers, durations |
+| **telegram** *(opt-in, off by default)* | Telegram client session (Telethon; separate research account only, ack-gated) | channel posts + discussion comments — views, reactions, real subscriber voice |
+| **tiktok-ig** *(opt-in, off by default)* | pay-per-use vendor (ScrapeCreators or Apify) | TikTok/IG posts + comments — every run costs vendor credits, the report says so |
+| **threads** *(key-gated)* | official Threads keyword_search (free token) or ScrapeCreators (pay-per-use) | Threads posts by keyword — official path keeps Meta's TOP order (no engagement counts; Standard Access = own posts only until App Review); vendor path adds like/reply counts, 1 credit/request |
 
 **Claude (this session)** — synthesis: reads the report files, writes
 `synthesis.md` (overlaps, contradictions, one-screen recommendation), then
@@ -164,6 +171,106 @@ optionally renders a shareable `brief.html`.
 - Simple fact-check — `WebSearch` is faster and cheaper.
 - Pure academic lit review — Scholar/arXiv/Semantic Scholar are better primaries.
 - Internal codes / private APIs — not in public sources.
+
+## Onboarding (first run) — the wizard IS the conversation
+
+There is no separate setup screen. The wizard is this dialogue, run once,
+and every upgrade must be earned by a real result shown first.
+
+**STEP 0 — read detected state.** A SessionStart hook (wired in the plugin
+root's `hooks/hooks.json`) injects JSON produced by `scripts/detect_state.py`:
+`{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq,
+threads}, telegram_session, profile, wizard_done, tier}`. If no hook context is present
+(Codex, Cursor, and other hosts without plugin hooks), run the detector
+yourself and parse its JSON — detection must be host-portable, not just the
+dialogue:
+```bash
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+python3 "$SKILL_DIR/scripts/detect_state.py"
+```
+If `wizard_done` is true → **skip onboarding entirely** (no repeat pitch,
+ever) and proceed with normal skill use.
+
+**STEP 1 — first question with the welcome INSIDE it.** Never send a
+standalone welcome message. Ask exactly one question whose text embeds the
+one-paragraph pitch — deep multi-source reaction-weighted research, $0 to
+start, zero keys needed — and whose options are the only decision. Use
+AskUserQuestion (modal) where available; the prose fallback below otherwise:
+- **Auto** — run the $0 proof right now.
+- **Manual** — let the user choose sources first, then run.
+- **Skip** — skip onboarding; write the STEP-4 marker with the current tier
+  and never pitch again.
+
+**STEP 2 — Tier-0 proof BEFORE any key ask.** Run the free connectors only —
+`--only hackernews,hiring,polymarket,github,github-issues,reddit,bluesky` — on a topic the
+user gives (or offer one concrete demo topic). Use the normal STEP 0 flow
+above: allocate the run, write `research-plan.md`, run, then show the brief.
+**No paid-key prompt may appear before this real result exists.**
+
+**STEP 3 — one visible decision per tier.** Offer upgrades one at a time,
+always naming what is already unlocked free first. Never stack questions.
+- **Tier 1 — own Gemini/Grok keys**: grounded LLM lenses, YouTube reading
+  via Gemini.
+- **Tier 2 — one OpenRouter key**: routes all LLM lenses through a single key.
+- **Telegram** (opt-in, HARD WARNING gate): separate/secondary account only,
+  never the personal one; state the ban risk and the risk to personal DMs
+  plainly; require explicit acknowledgement of both before any session
+  capture starts. The acknowledgement is machine-enforced: the connector
+  refuses to run until the environment carries
+  `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` (exact value). The Telethon
+  `*.session` file lives ONLY in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR`
+  or `~/.openclaw/secrets`; chmod 0600 on POSIX) — never inside the project
+  or research output tree. Telethon itself is an optional install
+  (`pip install telethon`); the connector is off by default — run it with
+  `--only telegram`.
+- **TikTok/IG**: pay-per-use vendor (ScrapeCreators), off by default; give an
+  honest per-run cost note before enabling. Vendor is selectable with
+  `DEEP_RESEARCH_TIKTOK_VENDOR` (`scrapecreators` default; `apify` needs
+  `APIFY_TOKEN`); run it with `--only tiktok-ig` — every run costs vendor
+  credits and the report header says so. Video transcription uses the media
+  backend: the default `client` profile needs `GROQ_API_KEY` + `GEMINI_API_KEY`
+  (cloud, cents), while `DEEP_RESEARCH_PROFILE=self` runs local MLX Whisper at
+  $0 (Mac-bound) — name the free local option, not just the paid keys.
+- **Threads**: two honest routes, pick one. Token-gated official API — free,
+  2,200 queries/day, but Standard Access searches only your own posts
+  (Advanced Access via App Review, ~1–2 weeks, unlocks public search) and
+  results carry no engagement counts. OR instant pay-per-use via
+  ScrapeCreators (engagement counts included, 1 credit/request, ~10 posts).
+  With only a ScrapeCreators key the connector routes to the vendor
+  automatically; `DEEP_RESEARCH_THREADS_VENDOR=scrapecreators` forces it
+  even when a token exists.
+- **Meta Ad Library**: free but token-gated — needs the user's own token.
+
+Each accepted tier ends with a verification step that proves it works: a real
+one-connector segment run through the newly unlocked channel.
+
+**STEP 4 — verify + doctor.** Run one more real segment, then show state with
+no network call:
+```bash
+python3 "$SKILL_DIR/scripts/deep-research.py" --diagnose
+```
+Then write the onboarding marker `<secrets-dir>/onboarding.json` =
+`{"wizard_done": true, "tier": "<highest unlocked>"}`, where the secrets dir
+is `DEEP_RESEARCH_SECRETS_DIR` or `~/.openclaw/secrets`.
+
+**Demand signals — reachable from any tier.** If the user says they want the
+paid/hosted version:
+```bash
+python3 "$SKILL_DIR/scripts/deep-research.py" --signal want-paid
+# or: --signal host-for-me
+```
+This records the signal locally; it notifies Nik only when a notify target is
+configured, and the confirmation copy must say honestly which of the two
+happened. Never silently create accounts or mint anything.
+
+**Prose fallback (hosts without a modal ask).** Same flow, numbered options:
+```
+Deep multi-source research, $0 to start, zero keys. Pick one:
+  1. Auto — run the free proof now on a topic you name
+  2. Manual — choose sources first
+  3. Skip — no onboarding, never ask again
+```
+Wait for the number, then continue at the matching step above.
 
 ## How to run
 
@@ -227,9 +334,15 @@ A **complete skill-authored bundle** is self-contained:
 ├── hackernews.md         — HN stories by points
 ├── hiring.md             — HN Who-is-hiring postings mentioning the topic
 ├── polymarket.md         — market odds (or honest "no markets")
-├── github.md             — top repos + recent issues
+├── github.md             — top repos (stars, push recency)
+├── github-issues.md      — top issues by reactions + comment excerpts
 ├── reddit.md             — top posts (or ERROR.md)
 ├── bluesky.md            — top posts (or ERROR.md)
+├── launch-radar.md       — what's shipping: momentum-ranked launches + category velocity
+├── revenue-radar.md      — what's selling: Flippa sold prices + Substack bestseller tiers
+├── telegram.md           — Telegram channel posts + comments (opt-in, ack-gated)
+├── tiktok-ig.md          — TikTok/IG posts + comments (opt-in, pay-per-use)
+├── threads.md            — Threads posts by keyword (official token or ScrapeCreators)
 ├── synthesis.md          — session: overlaps, contradictions, recommendation
 └── brief.html            — optional shareable dark-mode HTML (self-contained)
 ```
@@ -246,7 +359,7 @@ caller requested it. Probe and render-only modes allocate no research run.
 - OpenAI channel (**opt-in only**) uses gpt-5.4 (non-Pro) via `api.openai.com/v1/responses`. It bills the OpenAI API, so it is not in the default set — enable with `--only openai` on Nik's OK. Pro models are never used; that spend is reserved for `emergency-pro`.
 - Perplexity uses `sonar` (env `PERPLEXITY_RESEARCH_MODEL` to override).
 - If a channel fails (quota, network, key, throttle) it writes `<name>.ERROR.md` and records the error in `manifest.json`; other channels continue.
-- Direct channels are free and need no key. `github` prefers authed `gh` (higher rate limit), falls back to unauthenticated API.
+- Direct channels are free and need no key. `github` and `github-issues` prefer authed `gh` (higher rate limit), fall back to unauthenticated API.
 - HTML brief renders with a built-in mini markdown→HTML converter (no external deps); output is fully self-contained (inline CSS, system-font fallbacks behind Inter/JetBrains Mono) — safe to hand to Nik or share.
 
 ## Limits

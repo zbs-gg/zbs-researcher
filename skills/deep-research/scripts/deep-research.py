@@ -11,15 +11,36 @@ Two channel families run concurrently and write one markdown file each:
     - openai      gpt-5.4 (NON-Pro) + web_search -> Reddit / HN / GitHub / blogs
     - perplexity  Sonar online -> web + news, citation-first
 
+  Tier 2 (R8): one OPENROUTER_API_KEY (or ~/.openclaw/secrets/openrouter-key.txt)
+  drives gemini/grok/perplexity through OpenRouter when their direct keys are
+  absent; direct keys always win. openai is NOT OpenRouter-routed (R17).
+
   Direct channels (zero-config, free; give STRUCTURAL signal an LLM
   won't hand you — raw numbers, odds, velocity):
     - hackernews  HN Algolia -> stories ranked by points/comments
     - hiring      HN "Who is hiring?" -> topic mentions and sample companies
     - polymarket  Gamma markets -> real-money odds on the topic
-    - github      repo search -> stars, recent activity, top issues
-    - reddit      search.json -> top posts by upvotes (best-effort; Reddit
-                  throttles unauthenticated JSON, degrades to ERROR.md)
+    - github      repo search -> stars, recent activity
+    - github-issues  issue search -> top issues by reactions + comment
+                  excerpts (real user voice; repo-scoped via `owner/repo`)
+    - reddit      Arctic-Shift archive -> reaction-weighted posts (real
+                  score+comments; reddit.com/search.json is dead)
     - bluesky     app.bsky searchPosts (best-effort)
+    - launch-radar   what's shipping: Show HN + yc-oss + DevHunt (+Product
+                  Hunt with a free read token) -> momentum + category velocity
+    - revenue-radar  what's selling: Flippa sold prices + Substack bestseller
+                  tiers (free; tiers rendered verbatim, never invented ARR)
+    - meta-ads    who's PAYING to advertise: Meta Ad Library, EU scope
+                  (free token required; auto-skipped without one)
+    - telegram    Telegram channel posts + comments via a Telethon client
+                  session (OPT-IN, hard-warning gate: separate account only;
+                  Telethon is an optional lazy import, never a hard dep)
+    - tiktok-ig   TikTok/IG posts + comments via a pay-per-use vendor
+                  (OPT-IN + key-gated; every run costs vendor credits)
+    - threads     Threads posts by keyword — official keyword_search with a
+                  Threads token (free; Meta TOP order, no engagement counts;
+                  Standard Access = own posts only until App Review) or the
+                  ScrapeCreators vendor (pay-per-use, engagement-ranked)
 
 The deep-research skill owns the higher-level workflow: it reserves one
 project-local run with `--allocate-run`, writes `research-plan.md` before
@@ -63,7 +84,9 @@ Usage:
 """
 import argparse
 import html as html_mod
+import importlib
 import json
+import math
 import os
 import re
 import shutil
@@ -84,10 +107,26 @@ from output_paths import (
     resolve_project_root,
 )
 
+# Market-radar connector modules (R22/KTD7) live in the connectors/ package.
+# They reuse this module's HTTP + ranking helpers through a live-globals
+# injection: lookups happen per call, so tests that patch attributes on this
+# module are honored inside the connector modules too.
+import connectors as _market_radar_pkg
+from connectors import excerpt
+from connectors.launch_radar import channel_launch_radar
+from connectors.meta_ads import channel_meta_ads
+from connectors.revenue_radar import channel_revenue_radar
+from connectors.telegram import channel_telegram
+from connectors.threads import channel_threads
+from connectors.tiktok_ig import channel_tiktok_ig
+
+_market_radar_pkg.attach_runner(globals())
+
 # Where per-provider key files live. Defaults to ~/.openclaw/secrets (the
 # author's setup) but is overridable so anyone can point it elsewhere — or
 # skip files entirely and use env vars (GEMINI_API_KEY, GROK_API_KEY,
-# OPENAI_API_KEY, PERPLEXITY_API_KEY), which read_key() falls back to.
+# OPENAI_API_KEY, PERPLEXITY_API_KEY, OPENROUTER_API_KEY), which read_key()
+# falls back to.
 SECRETS = Path(os.environ.get("DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / ".openclaw" / "secrets"))).expanduser()
 UA = "deep-research/2.0 (+https://github.com/nkkmnk/deep-research-skill)"
 
@@ -128,9 +167,24 @@ KEYS = {
         r"pplx-[A-Za-z0-9_\-]+",
         "PERPLEXITY_API_KEY",
     ),
+    # Tier 2 (R8): ONE OpenRouter key covers the gemini/grok/perplexity lenses
+    # when their direct keys are absent. Resolution contract mirrors
+    # detect_state.py exactly (same file name, pattern, env var).
+    "openrouter": read_key(["openrouter-key.txt"], r"sk-or-[A-Za-z0-9_\-]+", "OPENROUTER_API_KEY"),
     # Optional paid video sources — only wired if a key shows up.
     "scrapecreators": read_key(["scrapecreators-key.txt"], r"[A-Za-z0-9_\-]{12,}", "SCRAPECREATORS_KEY"),
     "brave": read_key(["brave-key.txt"], r"[A-Za-z0-9_\-]{12,}", "BRAVE_API_KEY"),
+    # Media backend (R16): Groq Whisper transcription. Resolution contract
+    # mirrors detect_state.py / media_backend.py (same file, pattern, env).
+    "groq": read_key(["groq-key.txt"], r"gsk_[A-Za-z0-9_\-]+", "GROQ_API_KEY"),
+    # Meta Ad Library (R6): money-signal connector, token-gated — with
+    # requires=["meta_ads"] select_connectors auto-skips when absent and the
+    # manifest records the missing key (the honest degrade).
+    "meta_ads": read_key(["meta-ads-token.txt"], r"[A-Za-z0-9|]{20,}", "META_ADS_TOKEN"),
+    # Threads (R23): official keyword_search token. Optional — the threads
+    # connector declares fallback_key="scrapecreators", so either credential
+    # keeps it available; without both, select_connectors skips it honestly.
+    "threads": read_key(["threads-access-token.txt"], r"[A-Za-z0-9_\-]{20,}", "THREADS_ACCESS_TOKEN"),
 }
 
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -171,26 +225,152 @@ def _extract_responses_text(data):
 
 # ---------------------------------------------------------------------------
 # LLM channels
+#
+# Each lens has two paths:
+#   1. direct — the provider's own API with its own key (always preferred:
+#      independent blast radius, provider-native response shape);
+#   2. Tier 2 (R8) — no direct key but KEYS["openrouter"] present: the same
+#      lens through OpenRouter's chat/completions with the provider's explicit
+#      native grounding tool. NEVER the ":online" model suffix — that swaps in
+#      OpenRouter's generic web plugin instead of provider-native retrieval.
+# openai has NO Tier-2 path on purpose (R17: opt-in, direct key only).
 # ---------------------------------------------------------------------------
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Model ids are literal constants on purpose: no suffix machinery exists, so a
+# ":online" model can never be built (guarded by tests too).
+OPENROUTER_MODELS = {
+    "gemini": "google/gemini-2.5-pro",
+    "grok": "x-ai/grok-4",
+    "perplexity": "perplexity/sonar",
+}
+
+
+# Prompt text is shared between the direct and Tier-2 paths so a lens asks the
+# same question no matter how it is routed.
+def _gemini_prompt(query):
+    return (
+        "Search the web (especially YouTube) for the topic below. "
+        "Find recent (2025-2026) videos / talks / tutorials. "
+        "For each finding: title, channel/author, url, key claim "
+        "(2-3 sentences). Flag contradictions with other sources. "
+        "Conclude with a 5-7 line summary of recurring themes.\n\n"
+        f"TOPIC: {query}"
+    )
+
+
+_GROK_SYSTEM = (
+    "You search X / Twitter for honest user voice on technical topics. "
+    "Quote actual posts when available. Note dates. Surface contradictions."
+)
+
+
+def _grok_user(query):
+    return (
+        f"Search X for posts (2025-2026) about: {query}\n\n"
+        "Return: 1) 5-15 representative quotes (verbatim if possible) with "
+        "author handle and date, 2) recurring complaints, 3) workarounds "
+        "people share, 4) overall sentiment."
+    )
+
+
+_PERPLEXITY_SYSTEM = (
+    "You are a citation-first research assistant. Answer with concrete, "
+    "recent (2025-2026) findings and always attribute claims to sources. "
+    "Surface disagreements between sources rather than smoothing them over."
+)
+
+
+def _perplexity_user(query):
+    return (
+        f"Research this topic and report key findings with dates and sources, "
+        f"noting any contradictions: {query}"
+    )
+
+
+def openrouter_request_body(provider, query):
+    """Build the OpenRouter chat/completions request body for one LLM lens.
+
+    Pure function (no network) so tests pin the exact request shape. Grounding
+    is provider-native and explicit — NEVER the ":online" model suffix.
+    """
+    if provider == "gemini":
+        # KTD2: googleSearch is passed through in the provider-native schema
+        # (OpenRouter forwards provider-specific fields). This passthrough is
+        # NOT live-verified yet — the U4 smoke must confirm grounding evidence
+        # (real search-backed citations in the response) before Tier 2 is
+        # advertised for the gemini lens. Fallback if the smoke fails:
+        # Tier 2 = Sonar-only; gemini stays direct-key.
+        return {
+            "model": OPENROUTER_MODELS["gemini"],
+            "messages": [{"role": "user", "content": _gemini_prompt(query)}],
+            "tools": [{"googleSearch": {}}],
+        }
+    if provider == "grok":
+        # KTD2: same caveat as gemini — the x_search passthrough needs smoke
+        # confirmation before Tier 2 is advertised for the grok lens.
+        return {
+            "model": OPENROUTER_MODELS["grok"],
+            "messages": [
+                {"role": "system", "content": _GROK_SYSTEM},
+                {"role": "user", "content": _grok_user(query)},
+            ],
+            "tools": [{"type": "x_search"}],
+        }
+    if provider == "perplexity":
+        # Sonar is grounded by construction — the model id IS the retrieval.
+        # No tool field needed, so this lens is the safe Tier-2 baseline.
+        return {
+            "model": OPENROUTER_MODELS["perplexity"],
+            "messages": [
+                {"role": "system", "content": _PERPLEXITY_SYSTEM},
+                {"role": "user", "content": _perplexity_user(query)},
+            ],
+            "max_tokens": 4000,
+            "temperature": 0.3,
+        }
+    # openai (and anything else) is deliberately unrouted — R17.
+    raise ValueError(f"no OpenRouter route for provider: {provider}")
+
+
+def _channel_via_openrouter(provider, query, out_path):
+    """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
+    OpenAI chat/completions shape, append citations/annotations if present.
+    Errors propagate so run_connector writes <name>.ERROR.md."""
+    body = openrouter_request_body(provider, query)
+    data = post_json(
+        OPENROUTER_URL,
+        body,
+        {"Authorization": f"Bearer {KEYS['openrouter']}"},
+        timeout=600,
+    )
+    message, text = {}, ""
+    try:
+        message = data["choices"][0]["message"] or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content.strip()
+    except (KeyError, IndexError, TypeError):
+        message = {}
+    if not text:
+        text = json.dumps(data, indent=2)[:5000]
+    links = [c for c in (data.get("citations") or [])[:40] if isinstance(c, str)]
+    for a in (message.get("annotations") or [])[:40]:
+        u = a.get("url_citation") if isinstance(a, dict) else None
+        if isinstance(u, dict) and u.get("url"):
+            links.append(f"[{u.get('title') or u['url']}]({u['url']})")
+    if links:
+        text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
+    out_path.write_text(text)
+    return len(text)
+
+
 def channel_gemini(query, out_path, max_items):
+    if not KEYS["gemini"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("gemini", query, out_path)
     body = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            "Search the web (especially YouTube) for the topic below. "
-                            "Find recent (2025-2026) videos / talks / tutorials. "
-                            "For each finding: title, channel/author, url, key claim "
-                            "(2-3 sentences). Flag contradictions with other sources. "
-                            "Conclude with a 5-7 line summary of recurring themes.\n\n"
-                            f"TOPIC: {query}"
-                        )
-                    }
-                ],
-            }
-        ],
+        "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
         "generationConfig": {"maxOutputTokens": 8000, "temperature": 0.4},
     }
@@ -215,25 +395,14 @@ def channel_gemini(query, out_path, max_items):
 
 
 def channel_grok(query, out_path, max_items):
+    if not KEYS["grok"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("grok", query, out_path)
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
-            {
-                "role": "system",
-                "content": (
-                    "You search X / Twitter for honest user voice on technical topics. "
-                    "Quote actual posts when available. Note dates. Surface contradictions."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Search X for posts (2025-2026) about: {query}\n\n"
-                    "Return: 1) 5-15 representative quotes (verbatim if possible) with "
-                    "author handle and date, 2) recurring complaints, 3) workarounds "
-                    "people share, 4) overall sentiment."
-                ),
-            },
+            {"role": "system", "content": _GROK_SYSTEM},
+            {"role": "user", "content": _grok_user(query)},
         ],
         "tools": [{"type": "x_search"}],
     }
@@ -285,24 +454,14 @@ def channel_openai(query, out_path, max_items):
 
 
 def channel_perplexity(query, out_path, max_items):
+    if not KEYS["perplexity"]:
+        # Tier 2: no direct key — route through OpenRouter (KTD2).
+        return _channel_via_openrouter("perplexity", query, out_path)
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a citation-first research assistant. Answer with concrete, "
-                    "recent (2025-2026) findings and always attribute claims to sources. "
-                    "Surface disagreements between sources rather than smoothing them over."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Research this topic and report key findings with dates and sources, "
-                    f"noting any contradictions: {query}"
-                ),
-            },
+            {"role": "system", "content": _PERPLEXITY_SYSTEM},
+            {"role": "user", "content": _perplexity_user(query)},
         ],
         "max_tokens": 4000,
         "temperature": 0.3,
@@ -326,19 +485,126 @@ def channel_perplexity(query, out_path, max_items):
 
 
 # ---------------------------------------------------------------------------
+# Ranking (R21): comment-evidence + relevance floor
+#
+# Raw vote-count ranking lets an off-topic viral item bury on-topic results
+# for niche topics. The shared helper below fixes that with three rules:
+#   1. relevance floor — an item must match enough distinctive topic tokens
+#      before engagement counts at all; below-floor items rank strictly
+#      below every above-floor item regardless of votes;
+#   2. bounded engagement — log-scale, so 10k votes can't dominate purely
+#      on votes;
+#   3. "too clean" penalty — like-heavy/comment-light items (a common bot
+#      signature) are penalized when comment data is available.
+# Pure functions, no network: connectors fetch a pool and rank it here.
+# ---------------------------------------------------------------------------
+_RANK_STOPWORDS = frozenset(
+    "a an and are as at be but by can do for from has have how i if in is it its "
+    "my of on or our so that the their there these they this to was we what when "
+    "where which who why will with you your".split()
+)
+RELEVANCE_FLOOR = 0.34  # fraction of distinctive topic tokens that must appear
+
+
+def _rank_tokens(text):
+    """Lowercase word tokens minus stopwords (stopword-light, not a full NLP
+    pass — enough to make 'context engineering' distinctive)."""
+    words = re.findall(r"[a-z0-9][a-z0-9+#.\-]*", (text or "").lower())
+    return [w for w in words if w not in _RANK_STOPWORDS and len(w) >= 2]
+
+
+def relevance_score(text, topic):
+    """0..1: fraction of the topic's distinctive tokens present in text.
+    A topic with no distinctive tokens gates nothing (returns 1.0)."""
+    topic_tokens = set(_rank_tokens(topic))
+    if not topic_tokens:
+        return 1.0
+    text_tokens = set(_rank_tokens(text))
+    return len(topic_tokens & text_tokens) / len(topic_tokens)
+
+
+def engagement_score(votes, comments=None):
+    """Bounded (log10) engagement. Comments count as corroborating evidence;
+    a high-vote / near-zero-comment signature gets halved (bot smell).
+    `comments=None` means "no comment data" — no bonus, no penalty."""
+    votes = max(float(votes or 0), 0.0)
+    score = math.log10(1.0 + votes)
+    if comments is not None:
+        comments = max(float(comments or 0), 0.0)
+        score += 0.5 * math.log10(1.0 + comments)
+        if votes >= 50 and comments <= max(1.0, votes / 200.0):
+            score *= 0.5
+    return score
+
+
+class RankResult:
+    """Ranked items plus an optional degrade note the caller can surface."""
+
+    __slots__ = ("items", "note")
+
+    def __init__(self, items, note=None):
+        self.items = items
+        self.note = note
+
+
+def rank_items(items, topic, *, text_key, engagement_key, comments_key=None,
+               max_items=None):
+    """Order dict items by (relevance floor, then engagement+relevance).
+
+    Deterministic and stable: pure function of the input; exact ties keep
+    input order. When NO item clears the relevance floor the order is
+    best-effort (relevance, then engagement) and `note` explains that.
+    """
+    scored = []
+    for it in items:
+        rel = relevance_score(str(it.get(text_key) or ""), topic)
+        comments = it.get(comments_key) if comments_key else None
+        eng = engagement_score(it.get(engagement_key), comments)
+        tier = 0 if rel >= RELEVANCE_FLOOR else 1
+        scored.append((tier, -(eng + 1.5 * rel), -rel, it))
+    scored.sort(key=lambda row: row[:3])  # stable: ties keep input order
+    ranked = [row[3] for row in scored]
+    note = None
+    if ranked and all(row[0] == 1 for row in scored):
+        note = (
+            "no result cleared the topic-relevance floor; "
+            "order is best-effort (may be off-topic)"
+        )
+    if max_items is not None:
+        ranked = ranked[:max_items]
+    return RankResult(ranked, note)
+
+
+# ---------------------------------------------------------------------------
 # Direct channels (structural signal)
 # ---------------------------------------------------------------------------
 def channel_hackernews(query, out_path, max_items):
+    # Pull a pool larger than max_items so the relevance/engagement ranker
+    # has something to choose from (Algolia's own order is match-based).
+    pool = min(50, max(30, max_items * 3))
     url = (
         "https://hn.algolia.com/api/v1/search?"
-        + urllib.parse.urlencode({"query": query, "tags": "story", "hitsPerPage": max_items})
+        + urllib.parse.urlencode({"query": query, "tags": "story", "hitsPerPage": pool})
     )
     data = get_json(url, timeout=20)
-    hits = data.get("hits", [])
+    hits = [
+        {**h, "_rank_text": h.get("title") or h.get("story_title") or ""}
+        for h in data.get("hits", [])
+    ]
+    ranked = rank_items(
+        hits,
+        query,
+        text_key="_rank_text",
+        engagement_key="points",
+        comments_key="num_comments",
+        max_items=max_items,
+    )
     lines = [f"# Hacker News — top stories for: {query}\n"]
-    if not hits:
+    if ranked.note:
+        lines.append(f"_Note: {ranked.note}._\n")
+    if not ranked.items:
         lines.append("_No stories found._\n")
-    for h in hits:
+    for h in ranked.items:
         title = h.get("title") or h.get("story_title") or "?"
         obj = h.get("objectID", "")
         u = h.get("url") or f"https://news.ycombinator.com/item?id={obj}"
@@ -350,7 +616,7 @@ def channel_hackernews(query, out_path, max_items):
         lines.append(f"  - link: {u}")
         lines.append(f"  - discussion: {hn}")
     out_path.write_text("\n".join(lines) + "\n")
-    return len(hits)
+    return len(ranked.items)
 
 
 def channel_hiring(query, out_path, max_items):
@@ -430,25 +696,29 @@ def channel_polymarket(query, out_path, max_items):
     return len(events)
 
 
-def channel_github(query, out_path, max_items):
-    """Repo + issue search. Prefer authed `gh` (higher rate limit); fall
-    back to unauthenticated api.github.com search."""
-    def gh_api(path):
-        if shutil.which("gh"):
-            r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
-            if r.returncode == 0:
-                return json.loads(r.stdout)
-        return get_json("https://api.github.com/" + path, timeout=25)
+def gh_api(path):
+    """GitHub REST GET (path relative to the API root). Prefers the authed
+    `gh` CLI when installed (higher rate limit); falls back to unauthenticated
+    api.github.com. Shared by channel_github and channel_github_issues."""
+    if shutil.which("gh"):
+        r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            return json.loads(r.stdout)
+    return get_json("https://api.github.com/" + path, timeout=25)
 
+
+def channel_github(query, out_path, max_items):
+    """Repo search: stars + push recency. Issue/PR signal moved to the
+    dedicated github-issues connector (R11) — the old "Recent issues / PRs"
+    section here was duplicate signal (review decision)."""
     repos = gh_api(
         "search/repositories?" + urllib.parse.urlencode({"q": query, "sort": "stars", "per_page": max_items})
     )
-    issues = gh_api(
-        "search/issues?"
-        + urllib.parse.urlencode({"q": f"{query} in:title", "sort": "updated", "per_page": max_items})
-    )
+    items = repos.get("items", [])[:max_items]
     lines = [f"# GitHub — for: {query}\n", "## Top repositories (by stars)\n"]
-    for r in repos.get("items", [])[:max_items]:
+    if not items:
+        lines.append("_No repositories found._\n")
+    for r in items:
         lines.append(
             f"- **{r.get('full_name')}** — ★{r.get('stargazers_count',0):,}, "
             f"pushed {(r.get('pushed_at') or '')[:10]}"
@@ -456,38 +726,239 @@ def channel_github(query, out_path, max_items):
         if r.get("description"):
             lines.append(f"  - {r['description']}")
         lines.append(f"  - {r.get('html_url')}")
-    lines.append("\n## Recent issues / PRs mentioning it\n")
-    for it in issues.get("items", [])[:max_items]:
-        kind = "PR" if it.get("pull_request") else "issue"
+    lines.append(
+        "\n_Issue + comment evidence lives in the github-issues connector "
+        "(github-issues.md)._"
+    )
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(items)
+
+
+_GH_REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+_GH_ISSUES_COMMENT_ISSUES = 5      # top issues that get comment excerpts
+_GH_ISSUES_COMMENTS_PER_ISSUE = 5  # comment excerpts per issue
+_GH_ISSUES_COMMENT_CHARS = 280     # excerpt truncation length
+
+
+def _gh_reactions(obj):
+    """total_count from a GitHub `reactions` sub-object (search issue items
+    and comment bodies both carry one)."""
+    return (obj.get("reactions") or {}).get("total_count") or 0
+
+
+def channel_github_issues(query, out_path, max_items):
+    """Issues + comment bodies as product/competitor evidence (R11).
+
+    Two modes:
+      - topic (default): search issues everywhere sorted by reactions, then
+        rank client-side via rank_items (reactions = engagement, comment
+        count = corroboration, relevance floor vs the topic);
+      - owner/repo (query matches `owner/repo`): top issues of that repo by
+        reactions, server order kept — there is no topic to rank against.
+
+    For the top few issues the comment bodies are pulled (capped + truncated)
+    so the report carries actual user voice, not just titles. A failed
+    comment fetch degrades that one issue (note line), never the siblings.
+    Zero-config Tier 0: authed `gh` preferred, anonymous fallback; a hard
+    search failure (e.g. HTTP 403 rate limit) propagates so run_connector
+    writes ERROR.md."""
+    topic = query.strip()
+    repo_mode = bool(_GH_REPO_RE.match(topic))
+    q = f"repo:{topic} is:issue" if repo_mode else f"{topic} is:issue"
+    pool = max_items if repo_mode else min(30, max(15, max_items * 3))
+    found = gh_api(
+        "search/issues?"
+        + urllib.parse.urlencode({"q": q, "sort": "reactions", "order": "desc", "per_page": pool})
+    )
+    items = found.get("items", [])
+    note = None
+    if repo_mode:
+        issues = items[:max_items]
+    else:
+        for it in items:
+            it["_rank_text"] = f"{it.get('title') or ''} {(it.get('body') or '')[:400]}"
+            it["_reactions"] = _gh_reactions(it)
+        ranked = rank_items(
+            items,
+            topic,
+            text_key="_rank_text",
+            engagement_key="_reactions",
+            comments_key="comments",
+            max_items=max_items,
+        )
+        issues, note = ranked.items, ranked.note
+
+    scope = (
+        f"repo {topic} — top issues by reactions (server order)"
+        if repo_mode
+        else "issue search ranked by reactions + comment corroboration"
+    )
+    lines = [f"# GitHub issues — for: {query}\n", f"_Scope: {scope}._\n"]
+    if note:
+        lines.append(f"_Note: {note}._\n")
+    if not issues:
+        lines.append("_No issues found._\n")
+    for pos, it in enumerate(issues):
         lines.append(
-            f"- [{kind}] **{it.get('title')}** — {it.get('comments',0)} comments, "
+            f"- **{it.get('title') or '?'}** — {it.get('state') or '?'}, "
+            f"👍{_gh_reactions(it)} reactions, {it.get('comments') or 0} comments, "
             f"updated {(it.get('updated_at') or '')[:10]}"
         )
         lines.append(f"  - {it.get('html_url')}")
-    out_path.write_text("\n".join(lines) + "\n")
-    return len(repos.get("items", [])) + len(issues.get("items", []))
+        if pos >= _GH_ISSUES_COMMENT_ISSUES or not it.get("comments"):
+            continue
+        repo_path = (it.get("repository_url") or "").rsplit("/repos/", 1)[-1]
+        number = it.get("number")
+        if not repo_path or number is None:
+            continue
+        try:
+            comments = gh_api(
+                f"repos/{repo_path}/issues/{number}/comments?"
+                + urllib.parse.urlencode({"per_page": _GH_ISSUES_COMMENTS_PER_ISSUE})
+            )
+        except Exception as e:  # noqa: BLE001 — one issue's comments never kill siblings
+            lines.append(f"  - _comments unavailable: {str(e)[:120]}_")
+            continue
+        for c in comments[:_GH_ISSUES_COMMENTS_PER_ISSUE]:
+            author = (c.get("user") or {}).get("login") or "?"
+            body = excerpt(c.get("body"), _GH_ISSUES_COMMENT_CHARS)
+            lines.append(f"  - @{author} (👍{_gh_reactions(c)}): {body}")
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(issues)
+
+
+ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api"
+_REDDIT_MAX_SUBS = 4        # subreddits searched per run (rate-limit friendly)
+_REDDIT_POOL_PER_SUB = 25   # posts pulled per subreddit before ranking
+_REDDIT_WINDOW_DAYS = 365   # recency window
+_ARCTIC_SHIFT_RETRY_SLEEP = 3.0  # seconds before the single 429 retry
+
+
+def _arctic_shift_json(url, timeout=30):
+    """GET with ONE polite retry on 429 — Arctic-Shift rate-limits complex
+    queries (observed live: 'Too many complex queries. Please slow down.').
+    A persistent 429 or any other error propagates so the run_connector
+    wrapper writes ERROR.md."""
+    try:
+        return get_json(url, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        if e.code != 429:
+            raise
+        time.sleep(_ARCTIC_SHIFT_RETRY_SLEEP)
+        return get_json(url, timeout=timeout)
+
+
+def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
+    """Arctic-Shift's free-text post search REQUIRES a subreddit (or author)
+    filter — verified live 2026-07-17: 400 \"'query' query parameter requires
+    one of: author, subreddit\". So: prefix-match distinctive topic tokens
+    against the subreddit index, keep the candidates whose name/description
+    actually relate to the topic, best (relevance, subscribers) first."""
+    candidates = {}
+    joined_topic = "".join(_rank_tokens(query))  # "prompt engineering" -> "promptengineering"
+    for token in _rank_tokens(query)[:5]:
+        if len(token) < 3:
+            continue
+        url = f"{ARCTIC_SHIFT_BASE}/subreddits/search?" + urllib.parse.urlencode(
+            {"subreddit_prefix": token, "limit": 10}
+        )
+        for row in _arctic_shift_json(url, timeout=25).get("data") or []:
+            name = row.get("display_name") or ""
+            if not name or name in candidates:
+                continue
+            about = " ".join(
+                str(row.get(k) or "")
+                for k in ("display_name", "title", "public_description")
+            )
+            rel = relevance_score(about, query)
+            # CamelCase names tokenize to one word ("PromptEngineering") and
+            # would score 0 — a name that IS the topic concatenated is the
+            # strongest possible signal.
+            if joined_topic and joined_topic in name.lower():
+                rel = 1.0
+            candidates[name] = (rel, row.get("subscribers") or 0)
+    ordered = sorted(candidates.items(), key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))
+    return [name for name, _ in ordered[:limit]]
 
 
 def channel_reddit(query, out_path, max_items):
-    """Best-effort: Reddit throttles unauthenticated .json and may return
-    HTML — in which case we raise so the wrapper writes ERROR.md."""
-    url = "https://www.reddit.com/search.json?" + urllib.parse.urlencode(
-        {"q": query, "sort": "top", "t": "year", "limit": max_items}
-    )
-    data = get_json(url, timeout=20)  # raises/JSON-decode-errors if HTML served
-    children = data.get("data", {}).get("children", [])
+    """Reaction-weighted Reddit via the free Arctic-Shift archive (the old
+    reddit.com/search.json path is dead — Reddit throttles unauthenticated
+    JSON). Real `score` + `num_comments` confirmed in the live API. No
+    server-side score sort exists (sort_type: default|created_utc only), so
+    posts are pulled recent-first and ranked here via rank_items. Comment
+    bodies are NOT pulled: /api/comments/search 422s (\"Timeout. Maybe slow
+    down a bit\") — too expensive for a Tier-0 pass."""
+    subs = _arctic_shift_discover_subreddits(query)
     lines = [f"# Reddit — top posts for: {query}\n"]
-    if not children:
-        lines.append("_No posts found._\n")
-    for ch in children:
-        d = ch.get("data", {})
+    if not subs:
         lines.append(
-            f"- **{d.get('title','?')}** — ▲{d.get('ups',0)}, {d.get('num_comments',0)} comments, "
-            f"r/{d.get('subreddit','?')}"
+            "_No posts pulled: Arctic-Shift text search requires a subreddit "
+            "filter and no candidate subreddit matched this topic's tokens._\n"
         )
-        lines.append(f"  - https://www.reddit.com{d.get('permalink','')}")
+        out_path.write_text("\n".join(lines) + "\n")
+        return 0
+
+    after = time.strftime(
+        "%Y-%m-%d", time.gmtime(time.time() - _REDDIT_WINDOW_DAYS * 86400)
+    )
+    posts, seen = [], set()
+    for i, sub in enumerate(subs):
+        if i:  # pace the "complex" text-search queries a little
+            time.sleep(0.5)
+        url = f"{ARCTIC_SHIFT_BASE}/posts/search?" + urllib.parse.urlencode(
+            {
+                "query": query,
+                "subreddit": sub,
+                "after": after,
+                "limit": _REDDIT_POOL_PER_SUB,
+                "sort": "desc",
+                "sort_type": "created_utc",
+                "fields": "id,title,score,num_comments,subreddit,created_utc,selftext",
+            }
+        )
+        for p in _arctic_shift_json(url, timeout=30).get("data") or []:
+            pid = p.get("id")
+            if pid and pid in seen:
+                continue
+            seen.add(pid)
+            p["_rank_text"] = f"{p.get('title') or ''} {(p.get('selftext') or '')[:400]}"
+            posts.append(p)
+
+    scope = ", ".join(f"r/{s}" for s in subs)
+    lines.append(f"_Source: Arctic-Shift archive (free), last year. Scope: {scope}._\n")
+
+    if posts and not any("score" in p for p in posts):
+        lines.append(
+            "_Degraded: Arctic-Shift returned posts without score fields — "
+            "engagement ranking unavailable, order is relevance-only._\n"
+        )
+    ranked = rank_items(
+        posts,
+        query,
+        text_key="_rank_text",
+        engagement_key="score",
+        comments_key="num_comments",
+        max_items=max_items,
+    )
+    if ranked.note:
+        lines.append(f"_Note: {ranked.note}._\n")
+    if not ranked.items:
+        lines.append("_No posts found._\n")
+    for p in ranked.items:
+        lines.append(
+            f"- **{p.get('title','?')}** — ▲{p.get('score',0)}, "
+            f"{p.get('num_comments',0)} comments, r/{p.get('subreddit','?')}"
+        )
+        permalink = p.get("permalink")
+        if permalink:
+            lines.append(f"  - https://www.reddit.com{permalink}")
+        else:
+            lines.append(
+                f"  - https://www.reddit.com/r/{p.get('subreddit','?')}/comments/{p.get('id','')}"
+            )
     out_path.write_text("\n".join(lines) + "\n")
-    return len(children)
+    return len(ranked.items)
 
 
 def channel_bluesky(query, out_path, max_items):
@@ -518,16 +989,22 @@ def channel_bluesky(query, out_path, max_items):
 # Connector registry
 # ---------------------------------------------------------------------------
 class Connector:
-    def __init__(self, name, kind, fn, source, requires=(), default=True):
+    def __init__(self, name, kind, fn, source, requires=(), default=True, fallback_key=None):
         self.name = name
         self.kind = kind  # 'llm' | 'direct'
         self.fn = fn
         self.source = source
         self.requires = list(requires)
         self.default = default
+        # Tier 2 (R8): a key that satisfies `requires` when the direct key is
+        # absent (the channel itself still prefers the direct key).
+        self.fallback_key = fallback_key
 
     def missing_keys(self):
-        return [k for k in self.requires if not KEYS.get(k)]
+        missing = [k for k in self.requires if not KEYS.get(k)]
+        if missing and self.fallback_key and KEYS.get(self.fallback_key):
+            return []
+        return missing
 
     def available(self):
         return not self.missing_keys()
@@ -536,19 +1013,35 @@ class Connector:
 CONNECTORS = {
     c.name: c
     for c in [
-        Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"]),
-        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"]),
+        Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"], fallback_key="openrouter"),
+        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"], fallback_key="openrouter"),
         # openai is OFF by default: it bills the OpenAI API per token. Web/social
         # is covered by gemini+grok+perplexity (not OpenAI/Anthropic) + direct
         # channels. Opt in explicitly with --only openai when you want a GPT lens.
+        # NO OpenRouter fallback here either — openai stays direct-key only (R17).
         Connector("openai", "llm", channel_openai, "Reddit/HN/GitHub/blogs (gpt-5.4 web_search) — OPT-IN, bills OpenAI API", ["openai"], default=False),
-        Connector("perplexity", "llm", channel_perplexity, "web + news, citation-first (Sonar)", ["perplexity"]),
+        Connector("perplexity", "llm", channel_perplexity, "web + news, citation-first (Sonar)", ["perplexity"], fallback_key="openrouter"),
         Connector("hackernews", "direct", channel_hackernews, "HN Algolia — points/comments", []),
         Connector("hiring", "direct", channel_hiring, "HN Who-is-hiring — job-market hotness for a topic", []),
         Connector("polymarket", "direct", channel_polymarket, "real-money prediction odds", []),
-        Connector("github", "direct", channel_github, "repo stars + velocity + issues", []),
-        Connector("reddit", "direct", channel_reddit, "top posts by upvotes (best-effort)", []),
+        Connector("github", "direct", channel_github, "repo stars + velocity", []),
+        Connector("github-issues", "direct", channel_github_issues, "issues + comment evidence (free)", []),
+        Connector("reddit", "direct", channel_reddit, "top posts via Arctic-Shift archive (free, score+comments)", []),
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
+        Connector("launch-radar", "direct", channel_launch_radar, "what's shipping: Show HN + yc-oss + DevHunt (+PH with token)", []),
+        Connector("revenue-radar", "direct", channel_revenue_radar, "what's selling: Flippa sold + Substack leaderboards (free)", []),
+        Connector("meta-ads", "direct", channel_meta_ads, "who's paying to advertise: Meta Ad Library, EU scope (free token)", ["meta_ads"]),
+        # telegram is OFF by default (R9): it drives a real client session and
+        # is additionally gated at run time by DEEP_RESEARCH_TELEGRAM_ACK +
+        # a *.session file in the secrets dir. Opt in with --only telegram.
+        Connector("telegram", "direct", channel_telegram, "Telegram channels + comments via client session (opt-in, moat)", [], default=False),
+        # tiktok-ig is OFF by default AND key-gated (R10): pay-per-use vendor,
+        # every run costs credits. Opt in with --only tiktok-ig.
+        Connector("tiktok-ig", "direct", channel_tiktok_ig, "TikTok/IG posts+comments via pay-per-use vendor (opt-in)", ["scrapecreators"], default=False),
+        # threads (R23): official token preferred (free, Meta TOP order, no
+        # engagement counts); fallback_key keeps it available with ONLY the
+        # ScrapeCreators key — the channel then routes to the vendor path.
+        Connector("threads", "direct", channel_threads, "Threads posts by keyword (official token or ScrapeCreators)", ["threads"], fallback_key="scrapecreators"),
     ]
 }
 
@@ -561,8 +1054,15 @@ OUTPUT_NAMES = {
     "hiring": "hiring.md",
     "polymarket": "polymarket.md",
     "github": "github.md",
+    "github-issues": "github-issues.md",
     "reddit": "reddit.md",
     "bluesky": "bluesky.md",
+    "launch-radar": "launch-radar.md",
+    "revenue-radar": "revenue-radar.md",
+    "meta-ads": "meta-ads.md",
+    "telegram": "telegram.md",
+    "tiktok-ig": "tiktok-ig.md",
+    "threads": "threads.md",
 }
 
 
@@ -579,7 +1079,7 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock):
             manifest["channels"][conn.name] = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
         print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode()[:800]
+        detail = e.read().decode("utf-8", "replace")[:800]
         out_path.with_suffix(".ERROR.md").write_text(f"HTTP {e.code}\n{detail}")
         with lock:
             manifest["channels"][conn.name] = {"status": "error", "error": f"HTTP {e.code}"}
@@ -763,18 +1263,31 @@ def render_html(md_path, html_path):
 def list_connectors_json():
     rows = []
     for c in CONNECTORS.values():
-        rows.append(
-            {
-                "name": c.name,
-                "kind": c.kind,
-                "source": c.source,
-                "default": c.default,
-                "available": c.available(),
-                "requires": c.requires,
-                "missing_keys": c.missing_keys(),
-            }
-        )
+        row = {
+            "name": c.name,
+            "kind": c.kind,
+            "source": c.source,
+            "default": c.default,
+            "available": c.available(),
+            "requires": c.requires,
+            "missing_keys": c.missing_keys(),
+        }
+        if c.fallback_key:
+            row["fallback_key"] = c.fallback_key
+        rows.append(row)
     print(json.dumps({"connectors": rows}, indent=2))
+
+
+def _import_sibling(name):
+    """Import a sibling module from scripts/ (no hyphen, so a plain import
+    works when this file runs as a script and scripts/ is sys.path[0]); fall
+    back to an explicit path insert for importlib-loaded copies of this
+    module."""
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        return importlib.import_module(name)
 
 
 def main():
@@ -814,6 +1327,16 @@ def main():
         action="store_true",
         help="reserve a project-local run directory, print it, and exit",
     )
+    modes.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="print an offline doctor report (providers, profile, onboarding state)",
+    )
+    modes.add_argument(
+        "--signal",
+        metavar="KIND",
+        help="record a demand signal (want-paid | host-for-me) and exit",
+    )
     ap.add_argument("--html-out", metavar="HTML", help="output path for --render-html")
     # legacy aliases
     ap.add_argument("--gemini-q")
@@ -832,6 +1355,21 @@ def main():
 
     if args.list_connectors:
         list_connectors_json()
+        return
+
+    if args.diagnose:
+        detect_state = _import_sibling("detect_state")
+        print(detect_state.doctor_report())
+        return
+
+    if args.signal:
+        signals = _import_sibling("signals")
+        profile = os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client"
+        try:
+            result = signals.record_signal(args.signal, profile=profile)
+        except (ValueError, OSError) as exc:
+            ap.error(str(exc))
+        print(signals.signal_message(args.signal, result.notified))
         return
 
     if args.render_html:
