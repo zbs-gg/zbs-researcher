@@ -19,7 +19,6 @@ Stdlib only; no POSIX-only calls (Windows-safe); never logs secrets.
 """
 import json
 import os
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone

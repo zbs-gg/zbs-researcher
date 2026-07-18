@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import excerpt as _excerpt
 from . import runner
 
 SC_BASE = "https://api.scrapecreators.com"
@@ -51,7 +52,6 @@ _COMMENT_POSTS = 3        # top posts that get comment pulls (each costs credits
 _COMMENTS_PER_POST = 5
 _TRANSCRIBE_TOP = 3       # videos transcribed per run (media fetch + backend)
 _MEDIA_BYTES_CAP = 25 * 1024 * 1024
-_EXCERPT_CHARS = 240
 
 
 class VendorQuotaError(RuntimeError):
@@ -91,11 +91,6 @@ def _to_int(value):
         return int(float(value))
     except (TypeError, ValueError):
         return None
-
-
-def _excerpt(text, limit=_EXCERPT_CHARS):
-    flat = " ".join(str(text or "").split())
-    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
 def _extract_items(data):

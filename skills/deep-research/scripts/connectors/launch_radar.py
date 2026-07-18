@@ -36,8 +36,10 @@ runner's live globals — see connectors/__init__.py.
 import math
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from . import now as _now  # module-level binding so tests can freeze time
 from . import runner
 
 HALF_LIFE_DAYS = 30.0          # launch buzz half-life for recency decay
@@ -57,11 +59,6 @@ query LaunchRadar($first: Int!, $postedAfter: DateTime!) {
 """
 
 _YC_SEASON_MONTH = {"winter": 1, "spring": 4, "summer": 7, "fall": 10}
-
-
-def _now():
-    """Current epoch seconds — module-level so tests can freeze time."""
-    return time.time()
 
 
 def _parse_ts(value):
@@ -196,16 +193,16 @@ def _fetch_devhunt(topic, now, pool):
             {"q": f"repo:{_DEVHUNT_REPO} is:pr {topic}", "per_page": pool}
         )
     )
+    gh_reactions = runner("_gh_reactions")
     launches = []
     for it in found.get("items") or []:
-        reactions = (it.get("reactions") or {}).get("total_count") or 0
         launches.append(_launch(
             it.get("title") or "?",
             "DevHunt",
             it.get("html_url") or "?",
             _parse_ts(it.get("created_at")),
             now,
-            votes=reactions,
+            votes=gh_reactions(it),
             comments=it.get("comments") or 0,
         ))
     return launches
@@ -249,35 +246,38 @@ def channel_launch_radar(query, out_path, max_items):
     relevance_score = runner("relevance_score")
     floor = runner("RELEVANCE_FLOOR")
 
+    ph_token = runner("read_key")(
+        ["producthunt-token.txt"], r"[A-Za-z0-9_\-]{20,}", "PRODUCTHUNT_TOKEN"
+    )
+    jobs = [
+        ("ShowHN", _fetch_show_hn, (query, now, pool)),
+        ("YC", _fetch_yc, (query, now, pool)),
+        ("DevHunt", _fetch_devhunt, (query, now, pool)),
+    ]
+    if ph_token:  # token-gate checked BEFORE dispatch — no call without it
+        jobs.append(("PH", _fetch_product_hunt, (query, now, pool, ph_token)))
+
+    # Independent sub-sources fetch concurrently; results assemble in the
+    # fixed source order above so output matches a sequential run exactly.
+    with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+        futures = [
+            (label, executor.submit(fetch, *args))
+            for label, fetch, args in jobs
+        ]
+
     notes = []
     launches = []
     fetched_sources = []
-    for label, fetch in (
-        ("ShowHN", _fetch_show_hn),
-        ("YC", _fetch_yc),
-        ("DevHunt", _fetch_devhunt),
-    ):
+    for label, future in futures:
         try:
-            launches.extend(fetch(query, now, pool))
+            launches.extend(future.result())
             fetched_sources.append(label)
         except Exception as e:  # noqa: BLE001 — one source never kills siblings
             notes.append(
                 f"{label}: unavailable — {type(e).__name__}: {str(e)[:120]}"
             )
-
-    ph_token = runner("read_key")(
-        ["producthunt-token.txt"], r"[A-Za-z0-9_\-]{20,}", "PRODUCTHUNT_TOKEN"
-    )
     if not ph_token:
         notes.append("PH: token not configured (free read token unlocks it)")
-    else:
-        try:
-            launches.extend(_fetch_product_hunt(query, now, pool, ph_token))
-            fetched_sources.append("PH")
-        except Exception as e:  # noqa: BLE001
-            notes.append(
-                f"PH: unavailable — {type(e).__name__}: {str(e)[:120]}"
-            )
 
     # Relevance floor (shared with rank_items): drop off-topic launches so a
     # viral off-topic item can't dominate momentum or inflate velocity.

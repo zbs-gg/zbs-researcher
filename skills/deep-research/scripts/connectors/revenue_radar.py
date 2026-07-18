@@ -36,6 +36,7 @@ Helpers (get_json/ranking) resolve through the runner's live globals — see
 connectors/__init__.py.
 """
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 from . import runner
 
@@ -213,13 +214,20 @@ def channel_revenue_radar(query, out_path, max_items):
         f"# Revenue radar — what's selling for: {query}\n",
         "_Niche map: Flippa → microsaas · Substack → infoproducts._\n",
     ]
+    # Independent sub-sources fetch concurrently; sections assemble in the
+    # fixed source order below so output matches a sequential run exactly.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            (label, executor.submit(render, query, max_items))
+            for label, render in (
+                ("Flippa", _render_flippa),
+                ("Substack", _render_substack),
+            )
+        ]
     total = 0
-    for label, render in (
-        ("Flippa", _render_flippa),
-        ("Substack", _render_substack),
-    ):
+    for label, future in futures:
         try:
-            section, n = render(query, max_items)
+            section, n = future.result()
         except Exception as e:  # noqa: BLE001 — one source never kills siblings
             lines.append(
                 f"_{label}: unavailable — {type(e).__name__}: {str(e)[:120]}._\n"

@@ -12,7 +12,21 @@ patch attributes on their loaded deep-research module copy are honored inside
 the connectors — provided that copy attached last (test setUp re-attaches).
 """
 
+import time
+
 _RUNNER_GLOBALS = None
+
+
+def now():
+    """Current epoch seconds — module-level so tests can freeze time by
+    patching the per-connector `_now` binding."""
+    return time.time()
+
+
+def excerpt(text, limit=240):
+    """Whitespace-collapsed excerpt, truncated with an ellipsis."""
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
 def attach_runner(runner_globals):

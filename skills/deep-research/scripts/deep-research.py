@@ -80,6 +80,7 @@ Usage:
 """
 import argparse
 import html as html_mod
+import importlib
 import json
 import math
 import os
@@ -107,6 +108,7 @@ from output_paths import (
 # injection: lookups happen per call, so tests that patch attributes on this
 # module are honored inside the connector modules too.
 import connectors as _market_radar_pkg
+from connectors import excerpt
 from connectors.launch_radar import channel_launch_radar
 from connectors.meta_ads import channel_meta_ads
 from connectors.revenue_radar import channel_revenue_radar
@@ -810,9 +812,7 @@ def channel_github_issues(query, out_path, max_items):
             continue
         for c in comments[:_GH_ISSUES_COMMENTS_PER_ISSUE]:
             author = (c.get("user") or {}).get("login") or "?"
-            body = " ".join((c.get("body") or "").split())
-            if len(body) > _GH_ISSUES_COMMENT_CHARS:
-                body = body[:_GH_ISSUES_COMMENT_CHARS].rstrip() + "…"
+            body = excerpt(c.get("body"), _GH_ISSUES_COMMENT_CHARS)
             lines.append(f"  - @{author} (👍{_gh_reactions(c)}): {body}")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return len(issues)
@@ -1264,6 +1264,18 @@ def list_connectors_json():
     print(json.dumps({"connectors": rows}, indent=2))
 
 
+def _import_sibling(name):
+    """Import a sibling module from scripts/ (no hyphen, so a plain import
+    works when this file runs as a script and scripts/ is sys.path[0]); fall
+    back to an explicit path insert for importlib-loaded copies of this
+    module."""
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        return importlib.import_module(name)
+
+
 def main():
     process_cwd = Path.cwd().resolve()
     ap = argparse.ArgumentParser(
@@ -1332,24 +1344,12 @@ def main():
         return
 
     if args.diagnose:
-        # Sibling module (no hyphen, so a plain import works when this file
-        # runs as a script and scripts/ is sys.path[0]); fall back to an
-        # explicit path insert for importlib-loaded copies of this module.
-        try:
-            import detect_state
-        except ImportError:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import detect_state
+        detect_state = _import_sibling("detect_state")
         print(detect_state.doctor_report())
         return
 
     if args.signal:
-        # Sibling module; same import strategy as --diagnose above.
-        try:
-            import signals
-        except ImportError:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import signals
+        signals = _import_sibling("signals")
         profile = os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client"
         try:
             result = signals.record_signal(args.signal, profile=profile)

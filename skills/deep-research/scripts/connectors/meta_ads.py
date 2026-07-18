@@ -36,6 +36,7 @@ import time
 import urllib.error
 import urllib.parse
 
+from . import now as _now  # module-level binding so tests can freeze time
 from . import runner
 
 AD_LIBRARY_URL = "https://graph.facebook.com/v21.0/ads_archive"
@@ -56,11 +57,6 @@ _TOKEN_GUIDANCE = (
     "at https://www.facebook.com/ads/library/api/ and update "
     "meta-ads-token.txt (or META_ADS_TOKEN)."
 )
-
-
-def _now():
-    """Current epoch seconds — module-level so tests can freeze time."""
-    return time.time()
 
 
 def _parse_day(value):

@@ -36,6 +36,7 @@ globals — see connectors/__init__.py.
 import os
 import re
 
+from . import excerpt as _excerpt
 from . import runner
 
 ACK_ENV = "DEEP_RESEARCH_TELEGRAM_ACK"
@@ -44,7 +45,6 @@ _MAX_CHANNELS = 4          # channels pulled per run (rate-friendly)
 _SEARCH_LIMIT = 10         # global-search candidates before dedupe/cap
 _COMMENT_POSTS = 5         # top posts that get comment excerpts
 _COMMENTS_PER_POST = 5     # discussion replies per post
-_EXCERPT_CHARS = 240
 
 _HANDLE_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{2,31}$")
 
@@ -206,11 +206,6 @@ def _reaction_count(msg):
     for result in getattr(reactions, "results", None) or []:
         total += getattr(result, "count", 0) or 0
     return total
-
-
-def _excerpt(text, limit=_EXCERPT_CHARS):
-    flat = " ".join(str(text or "").split())
-    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
 def _post_record(entity, msg):
