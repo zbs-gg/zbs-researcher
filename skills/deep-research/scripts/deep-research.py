@@ -107,6 +107,11 @@ from output_paths import (
     resolve_project_root,
 )
 
+# Terminal UI (R4/R5): capability tiers, ZBS RESEARCHER banner, live board.
+# In the plain tier (pipes, CI, NO_COLOR, TERM=dumb) the runner's stderr is
+# byte-identical to the pre-banner format — pinned by the golden test.
+import term_ui
+
 # Market-radar connector modules (R22/KTD7) live in the connectors/ package.
 # They reuse this module's HTTP + ranking helpers through a live-globals
 # injection: lookups happen per call, so tests that patch attributes on this
@@ -128,7 +133,7 @@ _market_radar_pkg.attach_runner(globals())
 # OPENAI_API_KEY, PERPLEXITY_API_KEY, OPENROUTER_API_KEY), which read_key()
 # falls back to.
 SECRETS = Path(os.environ.get("DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / "elle" / ".secrets"))).expanduser()
-UA = "deep-research/2.0 (+https://github.com/nkkmnk/deep-research-skill)"
+UA = "deep-research/2.0 (+https://github.com/zbs-gg/zbs-research)"
 
 
 def read_key(filenames, prefix_pattern, env_var=None):
@@ -1073,7 +1078,14 @@ OUTPUT_NAMES = {
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
-def run_connector(conn, query, out_dir, max_items, manifest, lock):
+def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True):
+    """Run one connector; record its outcome in the manifest.
+
+    ``announce`` controls the per-channel stderr prints: True in the plain
+    tier (today's byte-compatible line-per-event output), False when the
+    animated board renders instead (KTD4 — the board replaces these lines
+    and the final summary is printed once after board teardown).
+    """
     t0 = time.time()
     out_path = out_dir / OUTPUT_NAMES[conn.name]
     try:
@@ -1081,18 +1093,40 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock):
         dt = time.time() - t0
         with lock:
             manifest["channels"][conn.name] = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
-        print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
+        if announce:
+            print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:800]
         out_path.with_suffix(".ERROR.md").write_text(f"HTTP {e.code}\n{detail}")
         with lock:
             manifest["channels"][conn.name] = {"status": "error", "error": f"HTTP {e.code}"}
-        print(f"[{conn.name}] HTTP {e.code}: {detail[:160]}", file=sys.stderr)
+        if announce:
+            print(f"[{conn.name}] HTTP {e.code}: {detail[:160]}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001 — degrade, never kill siblings
         out_path.with_suffix(".ERROR.md").write_text(f"ERROR: {e}")
         with lock:
             manifest["channels"][conn.name] = {"status": "error", "error": str(e)[:200]}
-        print(f"[{conn.name}] ERROR: {e}", file=sys.stderr)
+        if announce:
+            print(f"[{conn.name}] ERROR: {e}", file=sys.stderr)
+
+
+_BOARD_FRAME_SECONDS = 0.1  # ~10 fps
+
+
+def _board_loop(board, manifest, lock, stop_event):
+    """Board render thread: snapshot manifest state under the lock, write
+    frames at ~10 fps. ``render()`` stays pure — this thread only snapshots
+    and writes. One final frame is drawn after stop is requested so the last
+    visible state is complete (every completion/error/skip row present)
+    before the caller erases it and prints the one-time summary."""
+    skipped = manifest["connectors_skipped"]  # written once, before threads
+    while True:
+        stopping = stop_event.wait(_BOARD_FRAME_SECONDS)
+        with lock:
+            state = dict(manifest["channels"])
+        board.clear_and_write(state, skipped)
+        if stopping:
+            return
 
 
 def select_connectors(only, skip):
@@ -1323,6 +1357,11 @@ def main():
     )
     ap.add_argument("--q", action="append", default=[], metavar="name:query",
                     help="per-channel query override, repeatable (e.g. --q gemini:\"...\")")
+    ap.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="suppress the ZBS RESEARCHER banner art",
+    )
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--list-connectors", action="store_true", help="print connector availability as JSON and exit")
     modes.add_argument("--render-html", metavar="MD", help="render a markdown file to a shareable HTML brief")
@@ -1349,6 +1388,11 @@ def main():
     ap.add_argument("--gpt-q", dest="openai_q_legacy", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
+    # Terminal capabilities: probed once per process, on stderr (R5/KTD3).
+    # plain tier => byte-compatible output, no banner, no board.
+    caps = term_ui.ansi_caps()
+    show_banner = caps.tier != "plain" and not args.no_banner
+
     try:
         launch_cwd = resolve_launch_directory(args.launch_cwd, process_cwd)
     except ValueError as exc:
@@ -1362,6 +1406,10 @@ def main():
         return
 
     if args.diagnose:
+        # Banner in ansi/unicode tiers only — piped/plain doctor output stays
+        # exactly today's report (selftest pipes it; logs must stay clean).
+        if show_banner:
+            print(term_ui.banner(caps), file=sys.stderr)
         detect_state = _import_sibling("detect_state")
         print(detect_state.doctor_report())
         return
@@ -1458,14 +1506,40 @@ def main():
         "connectors_skipped": {c.name: f"missing keys: {c.missing_keys()}" for c in skipped},
         "channels": {},
     }
-    for c in skipped:
-        print(f"[{c.name}] SKIP — missing keys: {c.missing_keys()}", file=sys.stderr)
+
+    if show_banner:
+        print(term_ui.banner(caps), file=sys.stderr)
+
+    # Animated tier: the live board replaces the per-event prints (KTD4).
+    # Otherwise (plain, or color-without-TTY via FORCE_COLOR) today's
+    # line-per-event output stays the sole output — byte-compatible.
+    if not caps.animate:
+        for c in skipped:
+            print(f"[{c.name}] SKIP — missing keys: {c.missing_keys()}", file=sys.stderr)
 
     lock = threading.Lock()
+    run_start = time.time()
+    board = board_stop = board_thread = None
+    if caps.animate:
+        registry_order = {name: i for i, name in enumerate(CONNECTORS)}
+        requested = sorted(
+            (c.name for c in live + skipped),
+            key=lambda name: registry_order.get(name, len(registry_order)),
+        )
+        board = term_ui.LiveBoard(requested, caps, run_start, stream=sys.stderr)
+        board_stop = threading.Event()
+        board_thread = threading.Thread(
+            target=_board_loop,
+            args=(board, manifest, lock, board_stop),
+            daemon=True,
+        )
+        board_thread.start()
+
     threads = [
         threading.Thread(
             target=run_connector,
             args=(c, overrides.get(c.name, topic), out_dir, max_items, manifest, lock),
+            kwargs={"announce": not caps.animate},
         )
         for c in live
     ]
@@ -1473,6 +1547,29 @@ def main():
         t.start()
     for t in threads:
         t.join()
+
+    if board is not None:
+        board_stop.set()
+        board_thread.join()
+        board.stop()
+        # Final per-channel summary — printed exactly once, in board order,
+        # in the same format as the plain tier's line-per-event output.
+        for name in board.channel_names:
+            reason = manifest["connectors_skipped"].get(name)
+            if reason is not None:
+                print(f"[{name}] SKIP — {reason}", file=sys.stderr)
+                continue
+            record = manifest["channels"].get(name) or {}
+            if record.get("status") == "ok":
+                seconds = record.get("seconds")
+                seconds = seconds if isinstance(seconds, (int, float)) else 0.0
+                print(
+                    f"[{name}] OK {seconds:.1f}s ({record.get('items_or_chars')})",
+                    file=sys.stderr,
+                )
+            else:
+                error = term_ui.sanitize(record.get("error", "?"))
+                print(f"[{name}] ERROR: {error}", file=sys.stderr)
 
     manifest["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
