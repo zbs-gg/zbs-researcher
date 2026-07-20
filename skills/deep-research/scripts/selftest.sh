@@ -135,14 +135,14 @@ root = Path(sys.argv[1])
 plugin = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
-expected = "0.2.0"
+expected = "0.3.0"
 if plugin["version"] != expected or listed["version"] != expected:
     raise SystemExit(
         f"version mismatch: plugin={plugin['version']} marketplace={listed['version']} expected={expected}"
     )
 changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 if f"## {expected}" not in changelog or "project-local" not in changelog.lower():
-    raise SystemExit("changelog is missing the 0.2.0 project-local behavior entry")
+    raise SystemExit("changelog is missing the 0.3.0 entry or the project-local behavior marker")
 lowered_changelog = changelog.lower()
 for marker in ("ambiguous or malformed", "--only", "--skip", "blank explicit paths"):
     if marker not in lowered_changelog:

@@ -60,12 +60,12 @@ you opt in.
 ## Install
 
 ```bash
-# from a marketplace (once published)
-/plugin marketplace add nkkmnk/deep-research-skill
-/plugin install deep-research
+# from the marketplace
+claude plugin marketplace add zbs-gg/zbs-research
+claude plugin install deep-research@zbs-research
 
 # or test locally without installing
-claude --plugin-dir /path/to/deep-research-skill
+claude --plugin-dir /path/to/zbs-research
 ```
 
 Then the skill is available as `/deep-research:deep-research` (Claude also

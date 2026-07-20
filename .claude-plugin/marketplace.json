@@ -1,24 +1,24 @@
 {
-  "name": "deep-research-skill",
+  "name": "zbs-research",
   "owner": {
     "name": "Nikita Shilov",
     "url": "https://github.com/nkkmnk"
   },
   "metadata": {
-    "description": "Marketplace hosting the deep-research plugin."
+    "description": "Marketplace hosting the deep-research plugin (ZBS Researcher)."
   },
   "plugins": [
     {
       "name": "deep-research",
       "description": "Plan-first project-local multi-channel deep research + Claude synthesis. No Anthropic/OpenAI API spend by default.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "Nikita Shilov",
         "url": "https://github.com/nkkmnk"
       },
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/nkkmnk/deep-research-skill"
+      "homepage": "https://github.com/zbs-gg/zbs-research"
     }
   ]
 }

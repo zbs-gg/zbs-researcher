@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0 — 2026-07-21
+
+ZBS Researcher: persona, CLI polish, npx installer, showcase.
+
+- **ZBS Researcher persona** («Заебись-Ресёрчер», brand-only — plugin id stays
+  `deep-research`): the wizard introduces itself by name and asks at most two
+  persona questions (gender of address + tone preset), both skippable, only
+  after the $0 Tier-0 proof. Choice persists in `onboarding.json` as a
+  `persona` object; voicing rules pin that tone changes intonation and
+  sign-off only — never findings, rankings, or honesty notes.
+- **`term_ui` banner + live progress board** in the runner CLI: ASCII banner
+  and an animated per-connector board (spinner, status, elapsed) — rendered
+  ONLY in a real TTY. Non-TTY / `NO_COLOR` / `CI` / `TERM=dumb` output stays
+  byte-compatible with the previous plain per-channel lines.
+- **npx installer** `zbs-researcher`: one command
+  (`npx -y zbs-researcher@latest`) detects the `claude` CLI, adds the
+  marketplace, installs the plugin, and prints next steps. Prepared here;
+  npm publication is a separate manual action.
+- **Marketplace renamed** `deep-research-skill` → `zbs-research` (plugin id
+  unchanged). Migration: installs registered under the old marketplace name
+  should re-add it as `zbs-gg/zbs-research`.
+- **Showcase docs**: README showcase top, `docs/demo-script.md` (demo-video
+  shot list), `docs/site-brief.md` (hand-off brief for an external site
+  effort).
+
 ## 0.2.0 — 2026-07-15
 
 Unreleased package update for project-local research ownership.
