@@ -1,0 +1,26 @@
+# Hacker News — top stories for: agent memory
+
+- **We built a persistent agent memory layer on Elasticsearch with 0.89 recall** — 116 pts, 40 comments, 2026-06-18
+  - link: https://www.elastic.co/search-labs/blog/agent-memory-elasticsearch
+  - discussion: https://news.ycombinator.com/item?id=48583703
+- **Stuxnet worm reportedly planted by Iranian double agent using memory stick** — 95 pts, 89 comments, 2012-04-12
+  - link: http://arstechnica.com/business/news/2012/04/stuxnet-worm-reportedly-planted-by-iranian-double-agent-using-memory-stick.ars
+  - discussion: https://news.ycombinator.com/item?id=3834062
+- **Universal Memory Protocol – a shared format for agent memory** — 41 pts, 38 comments, 2026-06-06
+  - link: https://universalmemoryprotocol.io/
+  - discussion: https://news.ycombinator.com/item?id=48428796
+- **Agent Memory: An Anatomy** — 40 pts, 18 comments, 2026-05-27
+  - link: https://brgsk.xyz/agent-memory-anatomy/
+  - discussion: https://news.ycombinator.com/item?id=48287808
+- **Jarvis-1: Open-World Multi-Task Agents with Memory-Augmented Multimodal LLMs** — 39 pts, 4 comments, 2023-11-13
+  - link: https://craftjarvis-jarvis1.github.io/
+  - discussion: https://news.ycombinator.com/item?id=38255230
+- **Show HN: Phidata – Build AI Agents with memory, knowledge, tools and reasoning** — 27 pts, 0 comments, 2024-10-23
+  - link: https://github.com/phidatahq/phidata
+  - discussion: https://news.ycombinator.com/item?id=41925044
+- **Beads: A coding agent memory system** — 19 pts, 1 comments, 2025-10-13
+  - link: https://steve-yegge.medium.com/introducing-beads-a-coding-agent-memory-system-637d7d92514a
+  - discussion: https://news.ycombinator.com/item?id=45566864
+- **Memanto; open-source memory agent that remembers, recalls and answers** — 14 pts, 11 comments, 2026-06-18
+  - link: https://github.com/moorcheh-ai/memanto
+  - discussion: https://news.ycombinator.com/item?id=48585402

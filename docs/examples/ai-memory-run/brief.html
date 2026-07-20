@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>State of AI Memory — July 2026</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--fg:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--border:#30363d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+ font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ line-height:1.6;font-size:16px}
+.wrap{max-width:820px;margin:0 auto;padding:48px 24px 96px}
+h1,h2,h3,h4{line-height:1.25;font-weight:650}
+h1{font-size:1.9rem;margin:0 0 .2em;border-bottom:1px solid var(--border);padding-bottom:.3em}
+h2{font-size:1.35rem;margin:1.8em 0 .5em;color:#e6edf3}
+h3{font-size:1.1rem;margin:1.4em 0 .4em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ background:var(--panel);padding:.15em .4em;border-radius:5px;font-size:.88em}
+pre{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0}
+hr{border:none;border-top:1px solid var(--border);margin:2em 0}
+ul{padding-left:1.3em}li{margin:.25em 0}
+table{border-collapse:collapse;width:100%;margin:1em 0;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+th{background:var(--panel);font-weight:600}
+.meta{color:var(--muted);font-size:.85rem;margin-top:.4em}
+</style></head>
+<body><div class="wrap">
+<div class="meta">deep-research brief · 2026-07-08</div>
+<h1>State of AI Memory — July 2026</h1>
+<p>Синтез 7 каналов (gemini/grok/perplexity + hackernews/hiring/github/polymarket). reddit/bluesky — 403 (throttling), не участвуют. Дата: 2026-07-08.</p>
+<h2>Bottom line</h2>
+<p><strong>«Память не решена» — это консенсус, а не спор.</strong> Все три reasoning-канала (web, X, YouTube) сходятся: универсального победителя нет, а настоящее узкое место — <strong>не сам memory-инструмент, а архитектура агента</strong>, которая решает, что держать в контексте. Retrieval во многом «закрыт», temporal-память и долгий горизонт — нет. Терминология сместилась <code>prompt → context → memory engineering</code>, и уже проклёвывается следующий виток — <em>salience engineering</em> (не «что» в контексте, а «когда агенту говорить»).</p>
+<p>Центральное событие полугодия, всплывшее <strong>независимо в трёх каналах</strong> (X, YouTube, web) — июньская статья <strong>«Are We Ready For An Agent-Native Memory System?»</strong>, стресс-тест ~12 систем (Mem0, Zep, Letta, Cognee, MemOS, A-MEM, LightMem…). Именно она кристаллизовала «нет универсального победителя».</p>
+<h2>Игроки и числа (осторожно — часть цифр спорные)</h2>
+<table><thead><tr><th>Система</th><th>Что это</th><th>Сильна в</th><th>Числа (с оговорками)</th></tr></thead><tbody><tr><td><strong>Mem0</strong></td><td>vector+graph+KV слой</td><td>latency, персонализация, продакшн</td><td>~60K★ github, $24M Series A; LoCoMo multi-hop <strong>51%</strong>, LongMemEval <strong>49%</strong></td></tr><tr><td><strong>Zep (Graphiti)</strong></td><td>темпоральный KG, validity windows</td><td>«что изменилось на прошлой неделе»</td><td>LongMemEval <strong>63.8%</strong> — 15 пунктов над Mem0</td></tr><tr><td><strong>Letta (MemGPT)</strong></td><td>tiered self-editing, OS-подобная</td><td>retrieval простым файлом</td><td>LoCoMo filesystem <strong>74%</strong> (бьёт спец-тулы); 23.7K★</td></tr><tr><td><strong>Cognee</strong></td><td>hybrid graph-vector, 14 режимов</td><td>сложный retrieval</td><td>«первый» по гибридной архитектуре</td></tr><tr><td><strong>Built-in</strong> (ChatGPT/Claude/Gemini)</td><td>встроенная</td><td>удобство экосистемы</td><td>ChatGPT single-hop 63.79, слаб на multi-hop (42.9%)</td></tr></tbody></table>
+<p>⚠️ <strong>Черный ящик бенчмарков:</strong> Evermind.ai заявляет 93% LoCoMo / 83% LongMemEval, но формально не публикует. Mem0 публиковал «controversial» результаты про MemGPT, которые Letta оспаривает. Числа между источниками не сходятся, потому что меряют memory-тул в изоляции vs внутри агента.</p>
+<h2>Противоречия — главная ценность прогона</h2>
+<p>1. <strong>Простое бьёт сложное.</strong> Letta-filesystem 74% &gt; специализированных    графов/векторов; голый Long Context выигрывает на DB-Bench (@chenchengpro).    Прямо против нарратива «нужен навороченный memory-слой». 2. <strong>Retrieval решён / temporal — нет.</strong> Mem0 закрыл latency+персонализацию,    но 49% vs 63.8% Zep на LongMemEval = темпоральное рассуждение (факты,    которые меняются) в проде <strong>не решено</strong>. 3. <strong>«Галлюцинации прошлого».</strong> Факт обновился — система отдаёт старое.    Append-only хранилища деградируют катастрофически на длинном горизонте.    Graph-методы с lifecycle держат апдейты надёжнее. 4. <strong>Стоимость структуры.</strong> Глобальная перестройка (Mem0) — 374–552 сек;    локальное обслуживание (LightMem) — 17 сек. <strong>20–30× разрыв по латентности.</strong> 5. <strong>Авто-память опасна («instruction rot», @mattpocockuk).</strong> Self-improving    loops / авто-CLAUDE.md делают агента неуправляемым — он over-index'ит на    плохие или устаревшие «воспоминания». 6. <strong>External memory vs continual learning (философский, из YouTube).</strong> RAG-    память — это «memo, не память»; «Frozen Novice»: агент копит инфу, но веса    не меняются → настоящей экспертизы нет. Лагерь консолидации в веса    («биологический сон») vs лагерь практичной внешней памяти.</p>
+<h2>Что дал каждый канал (триангуляция сработала)</h2>
+<ul><li style="margin-left:0px"><strong>perplexity</strong> — структурный landscape + таблица бенчмарков с цитатами.</li><li style="margin-left:0px"><strong>grok (X)</strong> — живые голоса и дата-точная привязка к июньской статье;</li></ul>
+<p>  «фрагментировано как БД в 2003» (@stretchcloud); <em>salience engineering</em> как   следующий термин (@zxcasd12451).</p>
+<ul><li style="margin-left:0px"><strong>gemini (YouTube)</strong> — концептуальный слой: «memory engineering» как</li></ul>
+<p>  преемник context engineering; «Frozen Novice»; спор external vs weights.</p>
+<ul><li style="margin-left:0px"><strong>github</strong> — то, чего LLM не подсветили: <strong>memory poisoning</strong> как новая</li></ul>
+<p>  атака-поверхность («Sleeper Memory Poisoning in LLM Agents»; «Securing   LLM-Agent Long-Term Memory Against Poisoning»). Плюс звёзды/velocity   (Mem0 60K, bytedance/deer-flow 76K, memvid 15K).</p>
+<ul><li style="margin-left:0px"><strong>hackernews</strong> — Elasticsearch persistent agent memory 0.89 recall (116 pts);</li></ul>
+<p>  Universal Memory Protocol (общий формат); Steve Yegge «Beads».</p>
+<ul><li style="margin-left:0px"><strong>hiring</strong> — <em>context engineering</em> = 7 постингов в July-2026 who-is-hiring.</li></ul>
+<p>  Показательный: <strong>Kinelo</strong> прямо про «context myopia — агенты не знают, чего   не знают». Т.е. тема нанимается, но как ниша спецов, не hype-волна на джунов.</p>
+<h2>Слабые места прогона (честно)</h2>
+<ul><li style="margin-left:0px"><strong>reddit + bluesky = 403</strong> (throttling в этой сети) — community-голос</li></ul>
+<p>  недобран; X частично покрывает.</p>
+<ul><li style="margin-left:0px"><strong>polymarket нерелевантен</strong> — 0 рынков про AI-память; матчинг зацепил</li></ul>
+<p>  политический шум (Иран/Венесуэла). Тема не forecastable — коннектор честно   бесполезен здесь.</p>
+<ul><li style="margin-left:0px"><strong>HN Algolia</strong> подмешал исторический шум (Stuxnet 2012, Jarvis-1 2023) —</li></ul>
+<p>  релевантность неидеальна.</p>
+<h2>Почему это близко тебе (Pulse)</h2>
+<p>Конкурентный ландшафт памяти прямо пересекается с Pulse: Zep-temporal, «галлюцинации прошлого», спор «retrieval solved / temporal not» и черный ящик бенчмарков — это ровно те оси, где Pulse может честно позиционироваться («покажи, не продавай»: свой эвал на своих данных, а не заявленные 93%). Найм-сигнал говорит, что рынок под это есть, но узкий — покупатель = команда, которой болит temporal/долгий горизонт, а не «ещё один RAG».</p>
+</div></body></html>

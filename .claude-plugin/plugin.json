@@ -1,0 +1,26 @@
+{
+  "name": "deep-research",
+  "version": "0.3.0",
+  "description": "Plan-first project-local deep research — Gemini/Grok/Perplexity lenses + free direct connectors (Hacker News, hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis. Does not bill Anthropic/OpenAI APIs by default.",
+  "author": {
+    "name": "Nikita Shilov",
+    "url": "https://github.com/nkkmnk"
+  },
+  "homepage": "https://github.com/zbs-gg/zbs-research",
+  "repository": "https://github.com/zbs-gg/zbs-research",
+  "license": "MIT",
+  "keywords": [
+    "research",
+    "deep-research",
+    "hacker-news",
+    "polymarket",
+    "github",
+    "reddit",
+    "bluesky",
+    "perplexity",
+    "gemini",
+    "grok",
+    "hiring-signals",
+    "competitive-research"
+  ]
+}

@@ -1,0 +1,20 @@
+# Python / tooling
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Secrets — never commit
+*key*.txt
+*-key.txt
+secrets/
+.env
+.env.*
+
+# OS
+.DS_Store
+
+# Runtime research output at repo ROOT only.
+# Committed example runs live under docs/ and are NOT ignored.
+/research/
+/deep-research-*/

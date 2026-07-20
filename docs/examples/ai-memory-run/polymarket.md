@@ -1,0 +1,64 @@
+# Polymarket — real-money odds for: state of AI memory: LLM agent memory and context engineering, July 2026
+
+- **Longest applause at State of the Union?** — volume $2,036, ends 2026-02-24
+  - https://polymarket.com/event/longest-applause-at-state-of-the-union
+    - <30 seconds: Yes ≈12%
+    - 30 - 50 seconds: Yes ≈22%
+    - 50 - 70 seconds: Yes ≈22%
+    - 70 - 90 seconds: Yes ≈36%
+    - 90 - 110 seconds: Yes ≈22%
+    - 110 - 130 seconds: Yes ≈16%
+- **US economic state at the end of 2026?** — volume $29,066, ends 2027-01-31
+  - https://polymarket.com/event/us-economic-state-at-the-end-of-2026
+    - Soft Landing (Unemployment <5.0%, Inflation <3.5%): Yes ≈39%
+    - Stagflation (Unemployment ≥5.0%, Inflation ≥3.5%): Yes ≈12%
+    - Overheating (Unemployment <5.0%, Inflation ≥3.5%): Yes ≈38%
+    - Slack (Unemployment ≥5.0%, Inflation <3.5%): Yes ≈9%
+- **Iran leader end of 2026?** — volume $18,601,099, ends 2026-12-31
+  - https://polymarket.com/event/iran-leader-end-of-2026
+    - No Head of State: Yes ≈2%
+    - Muhammad Mirbaqiri: Yes ≈0%
+    - Sadegh Larijani: Yes ≈0%
+    - Mojtaba Khamenei: Yes ≈84%
+    - Hassan Khomeini: Yes ≈0%
+    - Reza Pahlavi: Yes ≈3%
+- **Venezuela leader end of 2026?** — volume $93,279,774, ends 2026-12-31
+  - https://polymarket.com/event/venezuela-leader-end-of-2026
+    - Edmundo González: Yes ≈0%
+    - María Corina Machado: Yes ≈3%
+    - Delcy Rodríguez: Yes ≈15%
+    - Diosdado Cabello Rondón: Yes ≈0%
+    - Nicolás Maduro: Yes ≈78%
+    - Dinorah Figuera: Yes ≈0%
+- **What will Trump say in July?** — volume $13,770, ends 2026-07-31
+  - https://polymarket.com/event/what-will-trump-say-in-july-20260629200910760
+    - Genius: Yes ≈100%
+    - Best of Trump: Yes ≈56%
+    - Muscle: Yes ≈100%
+    - Pathetic: Yes ≈100%
+    - Movie Star: Yes ≈62%
+    - Uranium: Yes ≈48%
+- **Venezuela de facto leader end of 2026?** — volume $240,621, ends 2026-12-31
+  - https://polymarket.com/event/venezuela-de-facto-leader-end-of-2026
+    - Nicolás Maduro: Yes ≈0%
+    - Delcy Rodríguez: Yes ≈90%
+    - María Corina Machado: Yes ≈3%
+    - Diosdado Cabello Rondón: Yes ≈0%
+    - Jorge Rodríguez: Yes ≈1%
+    - Edmundo González: Yes ≈0%
+- **Arizona Secretary of State Republican Primary Winner** — volume $0, ends 2026-07-21
+  - https://polymarket.com/event/arizona-secretary-of-state-republican-primary-winner-20260702190600142
+    - Alexander Kolodin: Yes ≈64%
+    - Gina Swoboda: Yes ≈42%
+    - Candidate A: Yes ≈50%
+    - Candidate B: Yes ≈50%
+    - Candidate C: Yes ≈50%
+    - Other: Yes ≈50%
+- **Largest Indian Company at end of 2026?** — volume $462, ends 2026-12-31
+  - https://polymarket.com/event/largest-indian-company-at-end-of-2026-20260629145859074
+    - Reliance Industries Ltd: Yes ≈88%
+    - HDFC Bank Ltd: Yes ≈43%
+    - Bharti Airtel Ltd: Yes ≈43%
+    - ICICI Bank Ltd: Yes ≈44%
+    - State Bank of India: Yes ≈42%
+    - Tata Consultancy Services Ltd: Yes ≈42%
