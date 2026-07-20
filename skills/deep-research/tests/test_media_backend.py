@@ -56,7 +56,7 @@ IMAGE = b"\x89PNG-fake-image-bytes"
 
 @contextlib.contextmanager
 def isolated_env(secrets_dir, **overrides):
-    """No host key (env or ~/.openclaw/secrets file) may satisfy a test."""
+    """No host key (env or ~/elle/.secrets file) may satisfy a test."""
     with mock.patch.dict(os.environ):
         for name in ("GROQ_API_KEY", "GEMINI_API_KEY", "DEEP_RESEARCH_PROFILE"):
             os.environ.pop(name, None)

@@ -27,7 +27,7 @@ We're already inside the agent, so **the conversation IS the wizard** — no sep
 - **Proof before ask (most important for a paid-key prompt):** run the free tier first and show a real result before ever prompting for a costly key.
 
 ## last30days NUX — two directly reusable lessons
-- Ships a **dual wizard**: "Claude Code Modal Flow" (Auto/Manual/Skip → consent → signup offer → source opt-in → first-topic picker, via `AskUserQuestion`) + an identical **Non-Modal Prose Flow** for OpenClaw/Codex/Cursor/Gemini-CLI.
+- Ships a **dual wizard**: "Claude Code Modal Flow" (Auto/Manual/Skip → consent → signup offer → source opt-in → first-topic picker, via `AskUserQuestion`) + an identical **Non-Modal Prose Flow** for Codex/Cursor/Gemini-CLI.
 - **#750:** embed the welcome pitch **inside the first setup-modal question** — Claude Code folds standalone tool output behind "ctrl+o to expand" and a standalone welcome gets buried unread.
 - **#524:** the maintainer **rejected silently auto-minting** a 3rd-party API key on first run — "explicit opt-in is the intended model." Directly relevant to our "just host it for me" tier: make it an **explicit named button**, never a silent default.
 

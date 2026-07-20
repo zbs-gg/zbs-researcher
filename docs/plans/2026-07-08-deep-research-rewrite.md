@@ -2,7 +2,7 @@
 
 **Дата:** 2026-07-08
 **Триггер:** Ник — «когда вызываешь ресёрч → СНАЧАЛА план ресёрча, потом запуск; добавить недостающие коннекторы; переписать скилл, DO больше не существует».
-**Файлы:** `~/OpenClawWorkspace/scripts/research/deep-research.py`, `~/.claude/skills/deep-research/SKILL.md`
+**Файлы:** `~/elle/scripts/research/deep-research.py`, `~/.claude/skills/deep-research/SKILL.md`
 
 ## Loop-first (4 вопроса)
 1. **Сигнал:** скрипт `--list-connectors` отдаёт JSON живых каналов; `--render-html` даёт бриф; smoke-прогон каждого канала пишет непустой .md или ERROR.md.

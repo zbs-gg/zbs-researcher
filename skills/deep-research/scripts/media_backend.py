@@ -91,7 +91,7 @@ class MediaBackendError(RuntimeError):
 def _secrets_dir():
     return Path(
         os.environ.get(
-            "DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / ".openclaw" / "secrets")
+            "DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / "elle" / ".secrets")
         )
     ).expanduser()
 
