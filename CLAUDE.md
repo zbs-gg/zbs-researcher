@@ -26,6 +26,6 @@ bash scripts/selftest.sh                                # 10-шаговый smok
 - **Бюджет-инвариант (R17):** дефолтный запуск не бьёт в Anthropic/OpenAI API; OpenAI — только явный opt-in. Платные вызовы (OpenRouter, вендоры) — никогда в тестах, в рантайме только при явно настроенных ключах.
 - **Stdlib-only** (urllib, threading). Telethon/MLX — только ленивые опциональные импорты.
 - **Windows-safe (R18):** никаких `signal.SIGALRM`, `os.killpg`, `fcntl`, `pty`, `os.fork`; только threading. Selftest это грепает.
-- **Секреты:** ключи через `DEEP_RESEARCH_SECRETS_DIR` (дефолт `~/.openclaw/secrets`) или env; никакого ключевого материала в выводах, логах и сообщениях об ошибках.
+- **Секреты:** ключи через `DEEP_RESEARCH_SECRETS_DIR` (дефолт `~/elle/.secrets`) или env; никакого ключевого материала в выводах, логах и сообщениях об ошибках.
 - **SKILL.md контракт selftest:** первые вхождения маркеров `## STEP 0 — RESEARCH PLAN` → `--allocate-run` → `research-plan.md` → `--output-dir "$RUN_DIR"` → `synthesis.md` обязаны идти в этом порядке; литерал `${CLAUDE_PLUGIN_ROOT}` в SKILL.md запрещён (в `hooks/hooks.json` — обязателен).
 - Graceful degrade: канал падает → `<name>.ERROR.md`, соседи продолжают. Не ломать этот паттерн.

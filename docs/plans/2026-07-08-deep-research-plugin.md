@@ -1,7 +1,7 @@
 # feat: deep-research → устанавливаемый Claude Code плагин
 
 Задача: превратить наш deep-research skill (SKILL.md + deep-research.py) в самостоятельный устанавливаемый плагин с marketplace-структурой, как mvanhorn/last30days-skill.
-Контекст: сейчас скилл живёт распределённо — SKILL.md в `~/.claude/skills/deep-research/`, скрипт в `~/OpenClawWorkspace/scripts/research/`. Не портируемо, не устанавливается, не версионируется.
+Контекст: сейчас скилл живёт распределённо — SKILL.md в `~/.claude/skills/deep-research/`, скрипт в `~/elle/scripts/research/`. Не портируемо, не устанавливается, не версионируется.
 Loop-first: сигнал — `claude plugin validate` зелёный + `/deep-research:research` работает из установленного плагина; источник — selftest.sh + ручной прогон; критерий — устанавливается на чистой машине и гоняет бесплатные каналы; ингест — отчёт + план-outcome.
 
 ## Подход и почему
@@ -13,7 +13,7 @@ Loop-first: сигнал — `claude plugin validate` зелёный + `/deep-re
 - `.claude-plugin/marketplace.json` с `source: "./"` делает репо самостоятельным marketplace → `/plugin marketplace add <repo>` затем `/plugin install deep-research`.
 - Скрипт кладём внутрь плагина; в SKILL.md пути через `${CLAUDE_PLUGIN_ROOT}` (портируемо на любой машине).
 
-**Секреты (портируемость без утечки):** скрипт уже читает env vars как fallback. Обобщаем: путь секрет-дира = `DEEP_RESEARCH_SECRETS_DIR` (default `~/.openclaw/secrets` — у Ника работает как есть; у чужих — env `GEMINI_API_KEY` и т.д.). Ключи Ника НЕ попадают в репо (.gitignore + скрипт хранит ключи в коде — нет, только читает).
+**Секреты (портируемость без утечки):** скрипт уже читает env vars как fallback. Обобщаем: путь секрет-дира = `DEEP_RESEARCH_SECRETS_DIR` (default `~/elle/.secrets` — у Ника работает как есть; у чужих — env `GEMINI_API_KEY` и т.д.). Ключи Ника НЕ попадают в репо (.gitignore + скрипт хранит ключи в коде — нет, только читает).
 
 **Целевое дерево:**
 ```
@@ -62,5 +62,5 @@ deep-research-skill/
 Outcome: ✅ Сделано (2026-07-08). Репо `~/dev/__PROJECTS/deep-research-skill/`, git main @ed63ee7 (локально, без публикации — по выбору Ника).
 Верификация: `claude plugin validate` ✔ passed; selftest ✔ (10 коннекторов, free-каналы, HTML self-contained, ноль платных API); key-leak scan ✔ чисто; оба JSON валидны.
 Установлен: `claude plugin marketplace add ~/dev/__PROJECTS/deep-research-skill` + `install deep-research@deep-research-skill` → v0.1.0 scope user. Активируется как `/deep-research:deep-research` в новой сессии.
-Отклонения от плана: скрипт правил не переносом а прямой правкой SECRETS (env-override DEEP_RESEARCH_SECRETS_DIR); output-dir пример в SKILL depersonalized (~/research вместо ~/OpenClawWorkspace).
+Отклонения от плана: скрипт правил не переносом а прямой правкой SECRETS (env-override DEEP_RESEARCH_SECRETS_DIR); output-dir пример в SKILL depersonalized (~/research вместо ~/elle).
 Осталось (по команде Ника): (1) публичный GitHub-пуш через external-ship-gate + depersonalize текста (упоминания Nik/~/elle в SKILL); (2) убрать локальный дубль `~/.claude/skills/deep-research` после проверки плагина; (3) фаза 2 — CI/тесты/TikTok-IG если пойдёт в паблик.

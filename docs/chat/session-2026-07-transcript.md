@@ -216,7 +216,7 @@ LLM-каналы структурно те же, но я тронула чтен
 Trend-monitoring (`--store`/briefing) — дублирует Pulse + твой `signals/inbox` с listen-чекпойнтами. Плюс TikTok/Instagram/Brave — нет ключей; оставила в скилле каркас-инструкцию «как добавить», если появится ScrapeCreators.
 
 **Файлы (абсолютные пути):**
-- Скрипт: `/Users/nikshilov/OpenClawWorkspace/scripts/research/deep-research.py`
+- Скрипт: `~/elle/scripts/research/deep-research.py`
 - Скилл: `/Users/nikshilov/.claude/skills/deep-research/SKILL.md`
 - План: `/Users/nikshilov/elle/plans/2026-07-08-deep-research-rewrite.md`
 
@@ -325,7 +325,7 @@ Codex CLI есть (`0.136.0`, headless `codex exec`). Проверю, умее�
 **10 коннекторов** (9 в дефолте + openai opt-in): gemini, grok, perplexity · hackernews, **hiring**, polymarket, github, reddit, bluesky · openai(opt-in). Plan-first STEP 0 на месте, DO выпилен, HTML-бриф работает.
 
 **Файлы:**
-- Скрипт: `/Users/nikshilov/OpenClawWorkspace/scripts/research/deep-research.py`
+- Скрипт: `~/elle/scripts/research/deep-research.py`
 - Скилл: `/Users/nikshilov/.claude/skills/deep-research/SKILL.md`
 - План: `/Users/nikshilov/elle/plans/2026-07-08-deep-research-rewrite.md`
 
@@ -361,7 +361,7 @@ plan-first загружен. Добираю точную схему — реал
 
 План зафиксирован: [2026-07-08-deep-research-plugin.md](../../../../elle/plans/2026-07-08-deep-research-plugin.md).
 
-**TLDR.** Собираю отдельный git-репо `~/dev/__PROJECTS/deep-research-skill/` с настоящей plugin-структурой (проверила по докам + по живому дереву last30days): `.claude-plugin/{plugin.json,marketplace.json}` + `skills/deep-research/{SKILL.md,scripts/}` + README/CONFIGURATION/LICENSE. Скрипт переезжает внутрь плагина, пути через `${CLAUDE_PLUGIN_ROOT}`, секреты — через env (твои `~/.openclaw/secrets` продолжают работать по умолчанию, чужим — свои ключи). Ставится через `/plugin marketplace add` или локально `--plugin-dir`.
+**TLDR.** Собираю отдельный git-репо `~/dev/__PROJECTS/deep-research-skill/` с настоящей plugin-структурой (проверила по докам + по живому дереву last30days): `.claude-plugin/{plugin.json,marketplace.json}` + `skills/deep-research/{SKILL.md,scripts/}` + README/CONFIGURATION/LICENSE. Скрипт переезжает внутрь плагина, пути через `${CLAUDE_PLUGIN_ROOT}`, секреты — через env (твои `~/elle/.secrets` продолжают работать по умолчанию, чужим — свои ключи). Ставится через `/plugin marketplace add` или локально `--plugin-dir`.
 
 Одна развилка реально меняет скоуп — она outward-facing, поэтому спрашиваю до старта:
 
@@ -383,7 +383,7 @@ SKILL.md — переписываю пути на `${CLAUDE_PLUGIN_ROOT}` (эт�
 
 ### 🤖 Эли
 
-Пути на `CLAUDE_PLUGIN_ROOT` встали. Последняя OpenClaw-ссылка (строка 109) — это пример output-dir, обобщу на нейтральный:
+Пути на `CLAUDE_PLUGIN_ROOT` встали. Последняя legacy-ссылка (строка 109) — это пример output-dir, обобщу на нейтральный:
 
 
 ### 🤖 Эли
@@ -433,7 +433,7 @@ deep-research-skill/
 ├── README.md · CONFIGURATION.md · CHANGELOG.md · LICENSE(MIT) · .gitignore
 ```
 
-Скрипт переехал внутрь, секреты обобщены (`DEEP_RESEARCH_SECRETS_DIR`, твои `~/.openclaw/secrets` работают по умолчанию; чужим — свои env-ключи; ключей в репо нет).
+Скрипт переехал внутрь, секреты обобщены (`DEEP_RESEARCH_SECRETS_DIR`, твои `~/elle/.secrets` работают по умолчанию; чужим — свои env-ключи; ключей в репо нет).
 
 ## Проверено — всё зелёное
 - `claude plugin validate` → **✔ passed**

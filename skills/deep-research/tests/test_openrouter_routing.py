@@ -56,9 +56,14 @@ def patched_keys(**overrides):
         "openai": "",
         "perplexity": "",
         "openrouter": "",
-        # not an LLM lens, but pinned so a host meta-ads token can't move a
-        # token-gated direct connector between live and skipped mid-test
+        # not LLM lenses, but pinned so a real key on the host machine can't
+        # move a token-gated direct connector between live and skipped
+        # mid-test. threads is available via EITHER its own token or the
+        # scrapecreators fallback, so both must be pinned.
         "meta_ads": "",
+        "scrapecreators": "",
+        "threads": "",
+        "brave": "",
     }
     values.update(overrides)
     return mock.patch.dict(deep_research.KEYS, values)
