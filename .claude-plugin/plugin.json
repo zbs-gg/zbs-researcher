@@ -9,7 +9,6 @@
   "homepage": "https://github.com/zbs-gg/zbs-research",
   "repository": "https://github.com/zbs-gg/zbs-research",
   "license": "MIT",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "research",
     "deep-research",

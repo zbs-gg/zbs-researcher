@@ -366,11 +366,15 @@ class HookWiringTests(unittest.TestCase):
             commands,
         )
 
-    def test_plugin_manifest_declares_the_hooks_file(self):
+    def test_plugin_manifest_omits_hooks_field_and_root_hooks_exist(self):
+        # A "hooks" field duplicating the auto-loaded root hooks/hooks.json
+        # makes the plugin fail to load on claude >= 2.1.207 — the root file
+        # is discovered automatically and must be the ONLY declaration.
         plugin = json.loads(
             (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(plugin["hooks"], "./hooks/hooks.json")
+        self.assertNotIn("hooks", plugin)
+        self.assertTrue((REPO_ROOT / "hooks" / "hooks.json").is_file())
 
 
 if __name__ == "__main__":
