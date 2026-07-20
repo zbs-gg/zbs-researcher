@@ -52,7 +52,7 @@ under `connectors_skipped` — the run continues with whatever is available.
 ## Key files instead of env vars
 
 Keys may also live as files in a secrets directory (one key per file). The
-directory defaults to `~/elle/.secrets` and is overridable:
+directory defaults to `~/.config/zbs-research/secrets` and is overridable:
 
 ```bash
 export DEEP_RESEARCH_SECRETS_DIR=~/.config/deep-research/secrets
@@ -128,7 +128,7 @@ Non-connector components:
   `DEEP_RESEARCH_PROFILE=self` runs local MLX models instead — nothing
   leaves the machine.
 - **Telegram session storage**: the Telethon `*.session` file lives **only**
-  in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR` or `~/elle/.secrets`,
+  in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR` or `~/.config/zbs-research/secrets`,
   chmod 0600 on POSIX) — never in the project or research output tree. The
   separate-account acknowledgement is machine-enforced: without the exact
   env value the connector refuses to run.

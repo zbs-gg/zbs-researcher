@@ -11,7 +11,7 @@ bot API exposes; that same power is why the connector is triple-gated:
 
   Gate 2 — session location (KTD4). The Telethon *.session file is resolved
   ONLY under the SECRETS dir (DEEP_RESEARCH_SECRETS_DIR or
-  ~/elle/.secrets). The project / research output tree is NEVER searched
+  ~/.config/zbs-research/secrets). The project / research output tree is NEVER searched
   — a .session in cwd is a leak, not a credential. On POSIX the session file
   is best-effort chmod 0600; on Windows this is a silent no-op (no
   POSIX-only calls).

@@ -28,7 +28,7 @@ files = {
 }
 texts = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
 
-forbidden = ("~/research", "~/elle/plans", "$HOME/research", "${HOME}/research")
+forbidden = ("~/research", "~/elle", "/Users/nikshilov", "$HOME/research", "${HOME}/research")
 problems = []
 for name, text in texts.items():
     for value in forbidden:

@@ -11,7 +11,7 @@ Two channel families run concurrently and write one markdown file each:
     - openai      gpt-5.4 (NON-Pro) + web_search -> Reddit / HN / GitHub / blogs
     - perplexity  Sonar online -> web + news, citation-first
 
-  Tier 2 (R8): one OPENROUTER_API_KEY (or ~/elle/.secrets/openrouter-key.txt)
+  Tier 2 (R8): one OPENROUTER_API_KEY (or <secrets-dir>/openrouter-key.txt)
   drives gemini/grok/perplexity through OpenRouter when their direct keys are
   absent; direct keys always win. openai is NOT OpenRouter-routed (R17).
 
@@ -127,17 +127,25 @@ from connectors.tiktok_ig import channel_tiktok_ig
 
 _market_radar_pkg.attach_runner(globals())
 
-# Where per-provider key files live. Defaults to ~/elle/.secrets (the
-# author's setup) but is overridable so anyone can point it elsewhere — or
-# skip files entirely and use env vars (GEMINI_API_KEY, GROK_API_KEY,
+# Where per-provider key files live. Defaults to a neutral XDG config dir
+# (~/.config/zbs-research/secrets), overridable via DEEP_RESEARCH_SECRETS_DIR —
+# or skip files entirely and use env vars (GEMINI_API_KEY, GROK_API_KEY,
 # OPENAI_API_KEY, PERPLEXITY_API_KEY, OPENROUTER_API_KEY), which read_key()
 # falls back to.
-SECRETS = Path(os.environ.get("DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / "elle" / ".secrets"))).expanduser()
+def _default_secrets_dir():
+    """Neutral, XDG-friendly default for per-provider key files.
+    Override with DEEP_RESEARCH_SECRETS_DIR, or skip files and use env vars."""
+    override = os.environ.get("DEEP_RESEARCH_SECRETS_DIR")
+    if override:
+        return Path(override).expanduser()
+    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    return Path(base).expanduser() / "zbs-research" / "secrets"
+SECRETS = _default_secrets_dir()
 UA = "deep-research/2.0 (+https://github.com/zbs-gg/zbs-research)"
 
 
 def read_key(filenames, prefix_pattern, env_var=None):
-    """Read an API key from the first of ~/elle/.secrets/<name> that
+    """Read an API key from the first of <secrets-dir>/<name> that
     exists (filenames is a list, tried in order), falling back to env_var.
     First regex match in the file wins so the file may hold either a bare
     key or a `KEY = sk-...` line."""

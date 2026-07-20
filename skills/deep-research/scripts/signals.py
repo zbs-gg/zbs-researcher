@@ -54,7 +54,8 @@ def default_signals_dir():
     """
     return Path(
         os.environ.get(
-            "DEEP_RESEARCH_SECRETS_DIR", str(Path.home() / "elle" / ".secrets")
+            "DEEP_RESEARCH_SECRETS_DIR",
+            str((Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "zbs-research" / "secrets")),
         )
     ).expanduser()
 
