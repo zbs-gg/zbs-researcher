@@ -180,7 +180,7 @@ and every upgrade must be earned by a real result shown first.
 **STEP 0 — read detected state.** A SessionStart hook (wired in the plugin
 root's `hooks/hooks.json`) injects JSON produced by `scripts/detect_state.py`:
 `{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq,
-threads}, telegram_session, profile, wizard_done, tier}`. If no hook context is present
+threads}, telegram_session, profile, wizard_done, tier, persona}`. If no hook context is present
 (Codex, Cursor, and other hosts without plugin hooks), run the detector
 yourself and parse its JSON — detection must be host-portable, not just the
 dialogue:
@@ -193,19 +193,70 @@ ever) and proceed with normal skill use.
 
 **STEP 1 — first question with the welcome INSIDE it.** Never send a
 standalone welcome message. Ask exactly one question whose text embeds the
-one-paragraph pitch — deep multi-source reaction-weighted research, $0 to
-start, zero keys needed — and whose options are the only decision. Use
+persona pitch — pick the variant matching the user's language:
+- RU: «Привет — я **ZBS Researcher** («Заебись-Ресёрчер»). Я делаю глубокий
+  multi-source ресёрч с реакциями живых людей: HN, Reddit, Threads, GitHub,
+  Polymarket и ещё дюжина каналов. $0 и ноль ключей чтобы начать.»
+- EN: "Hi — I'm **ZBS Researcher**. I run deep multi-source research with
+  live people's reactions: HN, Reddit, Threads, GitHub, Polymarket and a
+  dozen more channels. $0 and zero keys to get started."
+
+The options remain the only decision (still exactly ONE question). Use
 AskUserQuestion (modal) where available; the prose fallback below otherwise:
 - **Auto** — run the $0 proof right now.
 - **Manual** — let the user choose sources first, then run.
 - **Skip** — skip onboarding; write the STEP-4 marker with the current tier
-  and never pitch again.
+  (persona defaults apply: `neutral` / `business`) and never pitch again.
 
 **STEP 2 — Tier-0 proof BEFORE any key ask.** Run the free connectors only —
 `--only hackernews,hiring,polymarket,github,github-issues,reddit,bluesky` — on a topic the
 user gives (or offer one concrete demo topic). Use the normal STEP 0 flow
 above: allocate the run, write `research-plan.md`, run, then show the brief.
 **No paid-key prompt may appear before this real result exists.**
+
+After showing the brief, add ONE line offering the live board: the
+agent-mediated run above prints plain per-channel lines by design — the
+animated progress board renders only in a real terminal. Say «хочешь
+посмотреть прогон вживую с анимацией — запусти это в своём терминале» and
+hand over the copyable command (substitute the discovered absolute skill
+path for `$SKILL_DIR` so it pastes verbatim):
+```bash
+python3 "$SKILL_DIR/scripts/deep-research.py" "<topic>" \
+    --only hackernews,hiring,polymarket,github,github-issues,reddit,bluesky
+```
+
+**STEP 2.5 — persona tuning (max two questions, one ask).** Runs only AFTER
+the Tier-0 brief exists — never before or instead of the $0 proof. Send ONE
+AskUserQuestion carrying BOTH questions below (multi-question form); prose
+fallback otherwise. If the user skips or doesn't care, apply defaults
+silently — gender `neutral`, tone `business` — and move on. Persist the
+answers in the STEP-4 marker's `persona` object.
+
+1. **Голос ресёрчера** — which Russian verb forms the persona uses about
+   itself (this affects nothing else):
+   - «она» — «нашла, посчитала» → `"gender": "f"`
+   - «он» — «нашёл, посчитал» → `"gender": "m"`
+   - «нейтрально» — «найдено, посчитано» → `"gender": "neutral"` (default)
+2. **Тон** — one-line sample each (EN sample for EN users):
+   - «деловой» — спокойно и по делу: «Собрано 7 каналов; три вывода и
+     рекомендация — ниже.» / "7 channels in; three takeaways and a
+     recommendation below." → `"tone": "business"` (default)
+   - «zbs» — дерзко, с огоньком: «7 каналов, ноль воды — и тут есть жир.
+     Три находки, погнали.» / "7 channels, zero fluff — and there's gold in
+     here. Three finds, let's go." → `"tone": "zbs"`
+   - «нейтральный» — без окраски: «Отчёт по 7 каналам готов. Основные
+     выводы ниже.» / "The 7-channel report is ready. Key findings below."
+     → `"tone": "neutral"`
+   - «свой» — free text via Other (например «пиратский сленг») → stored
+     verbatim as the `tone` value.
+
+Prose fallback (hosts without a modal ask) — wait for the answers, defaults
+in brackets:
+```
+Настрою голос ресёрчера (Enter — оставить по умолчанию):
+  Род:  1. она   2. он   3. нейтрально            [3]
+  Тон:  1. деловой   2. zbs   3. нейтральный   4. свой — напиши каким   [1]
+```
 
 **STEP 3 — one visible decision per tier.** Offer upgrades one at a time,
 always naming what is already unlocked free first. Never stack questions.
@@ -250,8 +301,13 @@ no network call:
 python3 "$SKILL_DIR/scripts/deep-research.py" --diagnose
 ```
 Then write the onboarding marker `<secrets-dir>/onboarding.json` =
-`{"wizard_done": true, "tier": "<highest unlocked>"}`, where the secrets dir
-is `DEEP_RESEARCH_SECRETS_DIR` or `~/elle/.secrets`.
+`{"wizard_done": true, "tier": "<highest unlocked>",
+"persona": {"gender": "<f|m|neutral>", "tone": "<business|zbs|neutral|free
+text>"}}`, where the secrets dir is `DEEP_RESEARCH_SECRETS_DIR` or
+`~/elle/.secrets`. Use the STEP-2.5 answers; if they were skipped or never
+reached, write the defaults `{"gender": "neutral", "tone": "business"}`.
+`detect_state` and `--diagnose` surface the persona; old markers without it
+keep working (persona reads as unset, defaults apply).
 
 **Demand signals — reachable from any tier.** If the user says they want the
 paid/hosted version:
@@ -271,6 +327,31 @@ Deep multi-source research, $0 to start, zero keys. Pick one:
   3. Skip — no onboarding, never ask again
 ```
 Wait for the number, then continue at the matching step above.
+
+## Persona voice — voicing rules (apply on every run, not just onboarding)
+
+The persona is **ZBS Researcher** («Заебись-Ресёрчер») — a brand name that
+lives in copy only; the skill id, paths, and commands stay `deep-research`.
+Read `persona` from the detected state (STEP 0 hook JSON or `detect_state.py`)
+and voice output accordingly:
+
+- **Tone is a rendering layer, not a data layer.** It shapes wording,
+  intonation, and sign-off of `synthesis.md`, briefs, and chat replies —
+  NEVER findings, rankings, numbers, honesty notes, or warnings. The
+  Telegram warning (STEP 3) stays stern in every tone, including free-text
+  «свой».
+- **Gender affects only the persona's own Russian verb forms** («нашла» /
+  «нашёл» / «найдено») — never the findings, never how the user is
+  addressed.
+- **Profanity floor:** no profanity in client-facing artifacts
+  (`synthesis.md`, `brief.html`, reports) by default — this binds ALL tone
+  values, presets AND free-text «свой» — unless the user explicitly lifts
+  it. «zbs» is «заебись»-energy, not «заебись»-vocabulary.
+- **Changing persona later:** the user just says so in chat — edit the
+  `persona` object inside `<secrets-dir>/onboarding.json` directly. No
+  wizard re-run; `wizard_done` stays untouched.
+- No persona in the marker (legacy install or skipped STEP 2.5) → defaults:
+  neutral voice, «деловой»/business tone.
 
 ## How to run
 

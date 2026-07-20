@@ -9,7 +9,7 @@ whether the onboarding wizard already ran:
                    "openrouter": false, "scrapecreators": false,
                    "groq": false, "threads": false},
      "telegram_session": false, "profile": "client",
-     "wizard_done": false, "tier": null}
+     "wizard_done": false, "tier": null, "persona": null}
 
 Key resolution is delegated to the runtime itself: deep-research.py is loaded
 fresh on every collect_state() call, so SECRETS/KEYS are re-evaluated from the
@@ -56,17 +56,31 @@ def _load_runner():
 
 
 def _read_onboarding_marker(path):
-    """Return (wizard_done, tier); absent or malformed marker -> (False, None)."""
+    """Return (wizard_done, tier, persona).
+
+    Absent or malformed marker -> (False, None, None). Persona is surfaced
+    verbatim as {"gender": <str>, "tone": <str>} only when both fields are
+    strings (tone may be free text); any other shape — legacy markers without
+    persona included — degrades to None with the same tolerance as
+    wizard_done/tier. Never raises on marker content.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False, None
+        return False, None, None
     if not isinstance(data, dict):
-        return False, None
+        return False, None, None
     tier = data.get("tier")
     if isinstance(tier, bool) or not isinstance(tier, (str, int)):
         tier = None
-    return data.get("wizard_done") is True, tier
+    persona = data.get("persona")
+    if isinstance(persona, dict) and all(
+        isinstance(persona.get(field), str) for field in ("gender", "tone")
+    ):
+        persona = {"gender": persona["gender"], "tone": persona["tone"]}
+    else:
+        persona = None
+    return data.get("wizard_done") is True, tier, persona
 
 
 def collect_state(runner=None):
@@ -75,7 +89,7 @@ def collect_state(runner=None):
     providers = {name: bool(runner.KEYS.get(name)) for name in PROVIDERS}
     secrets = runner.SECRETS
     telegram_session = bool(secrets.is_dir() and any(secrets.glob("*.session")))
-    wizard_done, tier = _read_onboarding_marker(secrets / ONBOARDING_MARKER)
+    wizard_done, tier, persona = _read_onboarding_marker(secrets / ONBOARDING_MARKER)
     profile = os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client"
     return {
         "providers": providers,
@@ -83,6 +97,7 @@ def collect_state(runner=None):
         "profile": profile,
         "wizard_done": wizard_done,
         "tier": tier,
+        "persona": persona,
     }
 
 
@@ -105,6 +120,14 @@ def doctor_report():
     wizard = "done" if state["wizard_done"] else "not run"
     tier = state["tier"] if state["tier"] is not None else "-"
     lines.append(f"  onboarding  : wizard {wizard}, tier {tier}")
+    persona = state["persona"]
+    if persona is None:
+        lines.append("  persona     : not set")
+    else:
+        gender_word = {"m": "male", "f": "female", "neutral": "neutral"}.get(
+            persona["gender"], persona["gender"]
+        )
+        lines.append(f"  persona     : {gender_word} voice, tone {persona['tone']}")
     return "\n".join(lines)
 
 
@@ -119,6 +142,7 @@ def _absent_state():
         "profile": os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client",
         "wizard_done": False,
         "tier": None,
+        "persona": None,
     }
 
 

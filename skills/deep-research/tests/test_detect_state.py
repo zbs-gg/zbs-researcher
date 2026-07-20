@@ -79,6 +79,7 @@ class DetectStateTests(unittest.TestCase):
                 "profile": "client",
                 "wizard_done": False,
                 "tier": None,
+                "persona": None,
             },
         )
 
@@ -115,6 +116,107 @@ class DetectStateTests(unittest.TestCase):
         self.assertTrue(state["wizard_done"])
         self.assertEqual(state["tier"], "0")
         self.assertEqual(state["profile"], "operator")
+        # Legacy marker (pre-persona) reads fine: persona defaults to None.
+        self.assertIsNone(state["persona"])
+
+    def test_marker_persona_is_surfaced_verbatim(self):
+        personas = (
+            {"gender": "f", "tone": "zbs"},
+            {"gender": "neutral", "tone": "пиратский сленг, но вежливо"},
+        )
+        for persona in personas:
+            with self.subTest(persona=persona), tempfile.TemporaryDirectory() as tmp:
+                secrets = Path(tmp).resolve()
+                (secrets / "onboarding.json").write_text(
+                    json.dumps(
+                        {"wizard_done": True, "tier": "1", "persona": persona},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                with isolated_environment(secrets):
+                    state = detect_state.collect_state()
+
+                self.assertEqual(state["persona"], persona)
+                self.assertTrue(state["wizard_done"])
+                self.assertEqual(state["tier"], "1")
+
+    def test_malformed_persona_is_tolerated_as_none(self):
+        # Wrong-typed persona payloads must never crash the hook and never
+        # leak through: same tolerant stance as wizard_done/tier.
+        cases = (
+            "zbs",
+            ["f", "zbs"],
+            {"gender": 1, "tone": "zbs"},
+            {"gender": True, "tone": "zbs"},
+            {"gender": "f"},
+            {"tone": "zbs"},
+            {"gender": "f", "tone": ["zbs"]},
+        )
+        for persona in cases:
+            with self.subTest(persona=persona), tempfile.TemporaryDirectory() as tmp:
+                secrets = Path(tmp).resolve()
+                (secrets / "onboarding.json").write_text(
+                    json.dumps({"wizard_done": True, "tier": "0", "persona": persona}),
+                    encoding="utf-8",
+                )
+
+                with isolated_environment(secrets):
+                    state = detect_state.collect_state()
+
+                self.assertIsNone(state["persona"])
+                # The rest of the marker still parses.
+                self.assertTrue(state["wizard_done"])
+                self.assertEqual(state["tier"], "0")
+
+    def test_degrade_json_carries_persona_key(self):
+        # The _absent_state() degrade shape (SessionStart must never crash)
+        # has to carry the persona key too, so consumers can rely on it.
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp).resolve()
+            (secrets / "gemini-key.txt").write_bytes(b"\xff\xfe\x00\x80not-utf8")
+
+            env = os.environ.copy()
+            for name in STATE_ENV_VARS:
+                env.pop(name, None)
+            env["DEEP_RESEARCH_SECRETS_DIR"] = str(secrets)
+
+            result = subprocess.run(
+                [sys.executable, str(DETECT)],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(result.stdout)
+        self.assertIn("persona", state)
+        self.assertIsNone(state["persona"])
+
+    def test_doctor_report_renders_persona_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp).resolve()
+            (secrets / "onboarding.json").write_text(
+                json.dumps(
+                    {"wizard_done": True, "tier": "1", "persona": {"gender": "f", "tone": "zbs"}}
+                ),
+                encoding="utf-8",
+            )
+
+            with isolated_environment(secrets):
+                report = detect_state.doctor_report()
+
+        self.assertIn("persona", report)
+        self.assertIn("female voice, tone zbs", report)
+
+    def test_doctor_report_renders_persona_not_set(self):
+        with tempfile.TemporaryDirectory() as tmp, isolated_environment(tmp):
+            report = detect_state.doctor_report()
+
+        self.assertIn("persona", report)
+        self.assertIn("not set", report)
 
     def test_malformed_onboarding_marker_is_treated_as_absent(self):
         cases = (
@@ -223,6 +325,25 @@ class DiagnoseCliTests(unittest.TestCase):
             self.assertIn("client", stdout)
             self.assertNotIn(secret_value, stdout)
             self.assertFalse((launch_cwd / "research").exists())
+
+    def test_diagnose_renders_persona_line_from_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            launch_cwd = Path(tmp).resolve()
+            secrets = launch_cwd / "secrets"
+            secrets.mkdir()
+            (secrets / "onboarding.json").write_text(
+                json.dumps(
+                    {"wizard_done": True, "tier": "0", "persona": {"gender": "m", "tone": "business"}}
+                ),
+                encoding="utf-8",
+            )
+
+            with isolated_environment(secrets):
+                with mock.patch.object(deep_research.Path, "cwd", return_value=launch_cwd):
+                    stdout, _ = self.run_main("--diagnose")
+
+            self.assertIn("persona", stdout)
+            self.assertIn("male voice, tone business", stdout)
 
     def test_diagnose_is_mutually_exclusive_with_other_modes(self):
         for extra in (("--list-connectors",), ("--allocate-run",)):
