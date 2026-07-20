@@ -22,6 +22,7 @@ Stdlib only; no network; no POSIX-only calls (Windows-safe).
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -124,10 +125,16 @@ def doctor_report():
     if persona is None:
         lines.append("  persona     : not set")
     else:
+        # Free-text tone (and unmapped gender) may carry pasted content —
+        # strip control/escape bytes so --diagnose can never inject terminal
+        # sequences (title rewrites, colors) into the viewer's TTY.
+        def _clean(text):
+            return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b.|[\x00-\x08\x0b-\x1f\x7f]", "", str(text))
+
         gender_word = {"m": "male", "f": "female", "neutral": "neutral"}.get(
-            persona["gender"], persona["gender"]
+            persona["gender"], _clean(persona["gender"])
         )
-        lines.append(f"  persona     : {gender_word} voice, tone {persona['tone']}")
+        lines.append(f"  persona     : {gender_word} voice, tone {_clean(persona['tone'])}")
     return "\n".join(lines)
 
 
