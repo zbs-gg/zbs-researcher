@@ -1367,6 +1367,13 @@ def run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap):
 
     if n < 1:
         ap.error("--entities-n must be >= 1")
+    if args.entities_n is not None and args.entities_n > entity_fanout.HARD_N_CAP:
+        print(
+            f"[entity-fanout] --entities-n {args.entities_n} clamped to cap "
+            f"{entity_fanout.HARD_N_CAP}",
+            file=sys.stderr,
+        )
+        n = entity_fanout.HARD_N_CAP
     # Explicit --top-k above N is a user error; a defaulted K just clamps to N.
     if args.top_k is not None:
         k = args.top_k

@@ -96,6 +96,14 @@ class AggregateTest(unittest.TestCase):
         self.assertTrue(out["manifest"]["degraded"])
         self.assertEqual(out["manifest"]["channels"]["bluesky"]["fill_rate"], round(1 / 3, 3))
 
+    def test_degraded_boundary_exactly_half_not_degraded(self):
+        # error_fraction == 0.5 must NOT degrade (strict '>' threshold).
+        enum = enum_result(["a", "b"])
+        records = [rec("a", "bluesky", "error"), rec("b", "bluesky", "ok")]
+        out = self._agg(enum, records)
+        self.assertFalse(out["manifest"]["degraded"])
+        self.assertEqual(out["manifest"]["channels"]["bluesky"]["error_fraction"], 0.5)
+
     def test_healthy_run_not_degraded(self):
         enum = enum_result(["a", "b"])
         records = [rec("a", "hackernews", "ok"), rec("b", "hackernews", "ok")]

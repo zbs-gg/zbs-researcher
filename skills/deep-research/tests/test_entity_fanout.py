@@ -74,6 +74,60 @@ class RecordingChannel:
                 self.tracker.exit()
 
 
+def gh_repo(full, stars, desc):
+    return {"full_name": full, "stargazers_count": stars,
+            "pushed_at": "2026-07-20T00:00:00Z",
+            "html_url": f"https://github.com/{full}", "description": desc}
+
+
+class EnumFakeRunner:
+    """Runner globals for the REAL enumerate_entities + fan-out: fake gh_api /
+    HN / lens (counting) + real ranking helpers, so the dry-run-vs-paid
+    enumeration accounting can be exercised end-to-end (not mocked away)."""
+
+    def __init__(self, gh_items, hn_hits, lens_lines="1. mem0\n2. zep\n"):
+        self.gh_items = gh_items
+        self.hn_hits = hn_hits
+        self.lens_lines = lens_lines
+        self.lens_calls = 0
+
+    def gh_api(self, path):
+        return {"items": list(self.gh_items)}
+
+    def get_json(self, url, headers=None, timeout=30):
+        if "hn.algolia.com" in url:
+            return {"hits": list(self.hn_hits)}
+        raise AssertionError(f"unexpected get_json url: {url}")
+
+    def lens(self, query, out_path, max_items, usage_sink=None):
+        self.lens_calls += 1
+        Path(out_path).write_text(self.lens_lines, encoding="utf-8")
+        if usage_sink is not None:
+            usage_sink.append({"total_tokens": 100})
+        return len(self.lens_lines)
+
+    def free_channel(self, query, out_path, max_items):
+        Path(out_path).write_text(f"# {query}\n- x\n", encoding="utf-8")
+        return 1
+
+    def as_globals(self):
+        connectors = {"hackernews": types.SimpleNamespace(name="hackernews", fn=self.free_channel)}
+        for lens in ("perplexity", "gemini", "grok"):
+            connectors[lens] = types.SimpleNamespace(name=lens, fn=self.lens)
+        g = {
+            "gh_api": self.gh_api,
+            "get_json": self.get_json,
+            "relevance_score": deep_research.relevance_score,
+            "RELEVANCE_FLOOR": deep_research.RELEVANCE_FLOOR,
+            "engagement_score": deep_research.engagement_score,
+            "rank_items": deep_research.rank_items,
+            "CONNECTORS": connectors,
+        }
+        for lens in ("perplexity", "gemini", "grok"):
+            g["channel_" + lens] = self.lens
+        return g
+
+
 class ConcurrencyTracker:
     def __init__(self, hold=0.03):
         self.hold = hold
@@ -135,6 +189,22 @@ class FakeRunner:
         }
 
 
+class EntitySlugTest(unittest.TestCase):
+    def test_owner_repo_and_special_chars_are_filesystem_safe(self):
+        for name in ("owner/repo", "C++", "Node.js", "@mention", "  spaces  "):
+            slug = entity_fanout.entity_slug(name)
+            self.assertNotIn("/", slug)
+            self.assertNotIn("..", slug)
+            self.assertTrue(slug)  # never empty
+
+    def test_empty_or_symbol_only_falls_back(self):
+        self.assertEqual(entity_fanout.entity_slug(""), "entity")
+        self.assertEqual(entity_fanout.entity_slug("///"), "entity")
+
+    def test_bounded_length(self):
+        self.assertLessEqual(len(entity_fanout.entity_slug("x" * 500)), 60)
+
+
 class BuildCellsTest(unittest.TestCase):
     def test_free_cells_cartesian(self):
         ents = [entity("mem0"), entity("zep"), entity("letta")]
@@ -186,7 +256,27 @@ class RunMatrixTest(unittest.TestCase):
         cells = entity_fanout.build_free_cells(ents, channels=("hackernews",))
         entity_fanout.run_matrix(cells, self.tmp, self._ctx(), concurrency=2)
         self.assertLessEqual(tracker.peak, 2, f"peak concurrency {tracker.peak} exceeded cap 2")
+        # lower bound too: a regression to fully-serial execution would satisfy
+        # peak<=2 while defeating the whole point of the pool.
+        self.assertGreater(tracker.peak, 1, "cells ran serially — concurrency not used")
         self.assertEqual(len(hn.calls), 8)
+
+    def test_cell_dir_failure_degrades_only_that_cell(self):
+        # A pre-existing FILE where an entity's slug dir must go makes that
+        # cell's mkdir raise; it must degrade to an error record, not abort
+        # run_matrix and its siblings (regression guard: mkdir is inside try).
+        good = RecordingChannel()
+        runner = FakeRunner({"hackernews": good})
+        entity_fanout.attach_runner(runner.as_globals())
+        (Path(self.tmp) / "entities" / "mem0").parent.mkdir(parents=True, exist_ok=True)
+        (Path(self.tmp) / "entities" / "mem0").write_text("i am a file, not a dir")
+        cells = entity_fanout.build_free_cells(
+            [entity("mem0"), entity("zep")], channels=("hackernews",)
+        )
+        records = entity_fanout.run_matrix(cells, self.tmp, self._ctx(), concurrency=2)
+        by = {r["entity"]: r["status"] for r in records}
+        self.assertEqual(by["mem0"], "error")   # mkdir failed -> degraded, not crashed
+        self.assertEqual(by["zep"], "ok")        # sibling unaffected
 
     def test_per_cell_degrade_writes_error_and_siblings_survive(self):
         good = RecordingChannel()
@@ -387,6 +477,52 @@ class RunEntityFanoutTest(unittest.TestCase):
         self.assertTrue(agg["manifest"]["dry_run"])
         self.assertEqual(agg["manifest"]["paid_calls"], 0)
         self.assertEqual(agg["matrix"], [])
+
+    def test_dry_run_with_lens_key_makes_zero_paid_calls(self):
+        # Regression guard (code-review P0/P1): --dry-run must NOT fire the paid
+        # LLM enumeration lens even when a lens key is present, and must report
+        # paid_calls==0 honestly. Uses the REAL enumerate_entities.
+        runner = EnumFakeRunner(
+            gh_items=[gh_repo("mem0ai/mem0", 61000, "memory for AI agents")],
+            hn_hits=[{"title": "Show HN: Mem0 – memory for agents"}],
+        )
+        entity_fanout.attach_runner(runner.as_globals())
+        agg = entity_fanout.run_entity_fanout(
+            "LLM agent memory", self.tmp, {"perplexity": "pplx-x"},
+            dry_run=True, free_channels=("hackernews",),
+        )
+        self.assertEqual(runner.lens_calls, 0, "dry-run fired a paid enumeration lens call")
+        self.assertEqual(agg["manifest"]["paid_calls"], 0)
+        self.assertEqual(agg["manifest"]["tokens_real"], 0)
+
+    def test_paid_budget_zero_skips_enumeration_lens(self):
+        runner = EnumFakeRunner(
+            gh_items=[gh_repo("mem0ai/mem0", 61000, "memory for AI agents")],
+            hn_hits=[],
+        )
+        entity_fanout.attach_runner(runner.as_globals())
+        entity_fanout.run_entity_fanout(
+            "LLM agent memory", self.tmp, {"perplexity": "pplx-x"},
+            paid_budget=0, free_channels=("hackernews",),
+        )
+        self.assertEqual(runner.lens_calls, 0, "--paid-budget 0 fired a paid enumeration lens")
+
+    def test_full_run_counts_enumeration_lens_call(self):
+        # A real (non-dry) run WITH a lens key must account the enumeration lens
+        # call in the manifest (paid_calls + tokens_real). k=0 => no paid
+        # fan-out cells, so the only paid call is enumeration itself.
+        runner = EnumFakeRunner(
+            gh_items=[gh_repo("mem0ai/mem0", 61000, "memory for AI agents")],
+            hn_hits=[],
+        )
+        entity_fanout.attach_runner(runner.as_globals())
+        agg = entity_fanout.run_entity_fanout(
+            "LLM agent memory", self.tmp, {"perplexity": "pplx-x"},
+            k=0, free_channels=("hackernews",),
+        )
+        self.assertEqual(runner.lens_calls, 1, "enumeration lens should fire once")
+        self.assertEqual(agg["manifest"]["paid_calls"], 1)   # the enumeration call
+        self.assertEqual(agg["manifest"]["tokens_real"], 100)
 
     def test_empty_entities_clean_run(self):
         enum = {"topic": "t", "entities": [], "sources": {"github": "ok"}, "coverage": "none"}

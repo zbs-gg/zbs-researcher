@@ -73,9 +73,11 @@ class FakeRunner:
             return {"hits": list(self.hn_hits)}
         raise AssertionError(f"unexpected get_json url: {url}")
 
-    def _lens(self, query, out_path, max_items):
+    def _lens(self, query, out_path, max_items, usage_sink=None):
         self.lens_calls += 1
         Path(out_path).write_text(self.lens_lines or "", encoding="utf-8")
+        if usage_sink is not None:
+            usage_sink.append({"total_tokens": 42})
         return len(self.lens_lines or "")
 
     def as_globals(self):

@@ -81,9 +81,14 @@ HARD_CONCURRENCY_CAP = 16
 # (KTD7) so a rate-limit-hollow matrix is never presented as "complete".
 FILL_RATE_DEGRADE_THRESHOLD = 0.5
 
-# Rate-limit-prone hosts get per-host pacing + backoff (U4). Reddit and Bluesky
-# already 403/429 under load; github (issues) and HN Algolia do not pace here.
-THROTTLED_HOSTS = {"reddit": "reddit", "bluesky": "bluesky"}
+# Cell-level pacing+backoff (U4): single-request throttle-prone channels are
+# wrapped whole-cell here. Bluesky is one request per cell, so it fits. Reddit
+# makes several sub-requests per cell and paces each one INTERNALLY (per-request
+# via ctx.paced in _reddit_entity_cell) so its non-reentrant host lock is never
+# taken twice on one thread and independent reddit cells interleave between
+# requests instead of one cell holding the lock for its whole body. github
+# (issues) and HN Algolia do not pace here.
+THROTTLED_HOSTS = {"bluesky": "bluesky"}
 BACKOFF_STATUS = (429, 403)
 BACKOFF_RETRIES = 3
 BACKOFF_BASE_SECONDS = 1.0
@@ -220,13 +225,15 @@ def _llm_enum_prompt(topic, n):
     )
 
 
-def _enum_llm(topic, n, keys, tmpdir):
+def _enum_llm(topic, n, keys, tmpdir, usage_sink=None):
     """Optional/required LLM enumeration lens (KTD2).
 
     Reuses a lens channel_* function (no new vendor plumbing) with a list-style
     query, then extracts candidate names from the returned text. Picks the
     first lens whose key (direct or the shared openrouter fallback) is present.
-    Returns (candidate_names, lens_name) or ([], None) when no lens is available.
+    `usage_sink` captures the enumeration call's real token usage so the caller
+    can account it honestly (this is a real paid call). Returns
+    (candidate_names, lens_name) or ([], None) when no lens is available.
     """
     lens = _pick_enum_lens(keys)
     if not lens:
@@ -234,7 +241,7 @@ def _enum_llm(topic, n, keys, tmpdir):
     fn = _r("channel_" + lens)
     out = Path(tmpdir) / f"_enum_{lens}.md"
     try:
-        fn(_llm_enum_prompt(topic, n), out, n)
+        fn(_llm_enum_prompt(topic, n), out, n, usage_sink=usage_sink)
         text = out.read_text(encoding="utf-8", errors="replace")
     except Exception:  # noqa: BLE001 — enumeration lens failure degrades to no-LLM
         return [], None
@@ -316,7 +323,8 @@ def _blended_score(ent, titles):
     return score
 
 
-def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None):
+def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None,
+                       allow_llm=True, usage_sink=None):
     """Merge free sources (+ optional/required LLM) into a ranked entity list.
 
     Each source degrades independently: a failure is recorded in `sources` and
@@ -383,8 +391,11 @@ def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None):
     # topic shape decides whether the LLM lens is merely optional or required
     repo_shaped = _topic_is_repo_shaped(gh_entities, topic)
 
-    # (c) LLM enumeration — optional for repo-shaped, required otherwise
-    llm_names, lens = _enum_llm(topic, n, keys, tmpdir)
+    # (c) LLM enumeration — optional for repo-shaped, required otherwise.
+    # allow_llm=False (dry-run / --paid-budget 0) keeps enumeration free.
+    llm_names, lens = ([], None)
+    if allow_llm:
+        llm_names, lens = _enum_llm(topic, n, keys, tmpdir, usage_sink=usage_sink)
     if lens:
         for i, name in enumerate(llm_names):
             ent = _add({"name": name, "type": "unknown"}, "llm")
@@ -393,6 +404,8 @@ def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None):
             # LLM-derived aliases feed the dedup map for later adds
             alias_map.setdefault(normalize_name(name, alias_map), normalize_name(name, alias_map))
         sources["llm"] = f"ok ({lens})"
+    elif not allow_llm and _pick_enum_lens(keys):
+        sources["llm"] = "skipped (free preview)"
     elif _pick_enum_lens(keys):
         sources["llm"] = "error"
     else:
@@ -430,15 +443,14 @@ def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None):
 # ---------------------------------------------------------------------------
 class FanoutContext:
     """Shared state for a fan-out run: the topic, per-cell budget, the reddit
-    topic-subreddits (discovered ONCE), an injectable sleep, per-host locks
-    (U4), and a per-lens usage accumulator (U5). Thread-safe access to locks."""
+    topic-subreddits (discovered ONCE), an injectable sleep, and per-host locks
+    for pacing/backoff (U4). Thread-safe access to locks."""
 
     def __init__(self, topic, max_items, *, reddit_subs=None, sleep=None):
         self.topic = topic
         self.max_items = max_items
         self.reddit_subs = list(reddit_subs or [])
         self.sleep = sleep or time.sleep
-        self.usage = {}  # channel -> list[usage dict] (U5)
         self._host_locks = {}
         self._guard = threading.Lock()
 
@@ -531,7 +543,10 @@ def _reddit_entity_cell(entity_name, ctx, out_path):
                 "fields": "id,title,score,num_comments,subreddit,created_utc,selftext,permalink",
             }
         )
-        for p in arctic_json(url, timeout=30).get("data") or []:
+        # Pace + back off each reddit request per-host (U4), releasing the lock
+        # between requests so independent reddit cells interleave.
+        data = ctx.paced("reddit", lambda u=url: arctic_json(u, timeout=30))
+        for p in data.get("data") or []:
             pid = p.get("id")
             if pid and pid in seen:
                 continue
@@ -562,6 +577,10 @@ def _reddit_entity_cell(entity_name, ctx, out_path):
         permalink = p.get("permalink")
         if permalink:
             lines.append(f"  - https://www.reddit.com{permalink}")
+        else:
+            lines.append(
+                f"  - https://www.reddit.com/r/{p.get('subreddit','?')}/comments/{p.get('id','')}"
+            )
     out_path.write_text("\n".join(lines) + "\n")
     return len(ranked.items)
 
@@ -600,7 +619,6 @@ def _run_cell(cell, out_dir, ctx):
     channel = cell["channel"]
     slug = entity_slug(entity["name"])
     cell_dir = Path(out_dir) / "entities" / slug
-    cell_dir.mkdir(parents=True, exist_ok=True)
     out_path = cell_dir / f"{channel}.md"
     t0 = time.time()
     rec = {
@@ -621,6 +639,9 @@ def _run_cell(cell, out_dir, ctx):
                                usage_sink=usage_sink)
 
     try:
+        # mkdir is inside the try so a filesystem failure (disk full, perms,
+        # Windows MAX_PATH) degrades THIS cell instead of aborting the matrix.
+        cell_dir.mkdir(parents=True, exist_ok=True)
         host = THROTTLED_HOSTS.get(channel)
         # Throttle-prone hosts pace per-host + back off (U4); others run direct.
         n = ctx.paced(host, _body) if host else _body()
@@ -971,13 +992,21 @@ def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
     t0 = time.time()
 
+    # The enumeration LLM lens is a REAL paid call (KTD2). Keep it free on a
+    # dry-run preview and when the user asked for a zero paid budget; otherwise
+    # capture its usage so it is accounted honestly, not hidden.
+    allow_enum_llm = not dry_run and paid_budget != 0
+    enum_usage = []
+
     # dry-run enumerates without needing reddit subreddits (no fan-out).
-    reddit_subs = (
-        discover_reddit_subs(topic) if (not dry_run and "reddit" in free_channels) else []
-    )
+    reddit_wanted = "reddit" in free_channels
+    reddit_subs = discover_reddit_subs(topic) if (not dry_run and reddit_wanted) else []
     ctx = FanoutContext(topic, max_items, reddit_subs=reddit_subs)
 
-    enum = enumerate_entities(topic, n=n, keys=keys, tmpdir=str(out_dir))
+    enum = enumerate_entities(
+        topic, n=n, keys=keys, tmpdir=str(out_dir),
+        allow_llm=allow_enum_llm, usage_sink=enum_usage,
+    )
     cells, plan_report = plan_cells(
         enum["entities"], keys, free_channels=free_channels, lenses=lenses,
         k=k, paid_all=paid_all, paid_budget=paid_budget,
@@ -991,13 +1020,19 @@ def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
             "dry_run": True,
             "topic": topic,
             "started": started,
+            "finished": started,
+            "wall_seconds": round(time.time() - t0, 1),
             "entities": len(enum["entities"]),
             "coverage": enum.get("coverage"),
             "enumeration_sources": enum.get("sources"),
             "plan": plan_report,
+            "channels": {},
+            "cells_ok": 0,
+            "cells_error": 0,
             "paid_calls": 0,
             "tokens_real": 0,
             "tokens_est": 0,
+            "degraded": False,
         }
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         return {"matrix": [], "manifest": manifest}
@@ -1008,20 +1043,24 @@ def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
         enum, records, topic=topic, started=started, finished=finished,
         wall_seconds=time.time() - t0, plan_report=plan_report,
     )
+    # account the enumeration lens call (a real paid call) in the manifest
+    enum_tokens = sum(_usage_total(u) for u in enum_usage)
+    if str(enum.get("sources", {}).get("llm", "")).startswith("ok"):
+        agg["manifest"]["paid_calls"] += 1
+        agg["manifest"]["tokens_real"] += enum_tokens
+    # honesty: a requested reddit column with no discovered subreddits is dark,
+    # not complete — flag the run degraded so the empty column isn't sold as ok.
+    if reddit_wanted and not reddit_subs:
+        agg["manifest"]["degraded"] = True
+        agg["manifest"]["reddit_subs_empty"] = True
+
     (out_dir / "matrix.json").write_text(json.dumps(agg["matrix"], indent=2), encoding="utf-8")
     (out_dir / "manifest.json").write_text(json.dumps(agg["manifest"], indent=2), encoding="utf-8")
-    _maybe_render_brief(out_dir, topic, agg)
+    try:
+        render_entity_brief(out_dir, topic, agg)
+    except Exception:  # noqa: BLE001 — a brief failure never fails the run
+        pass
     return agg
-
-
-def _maybe_render_brief(out_dir, topic, agg):
-    """Render brief.html when the U7 renderer is present (wired in U7)."""
-    renderer = globals().get("render_entity_brief")
-    if renderer is not None:
-        try:
-            renderer(out_dir, topic, agg)
-        except Exception:  # noqa: BLE001 — a brief failure never fails the run
-            pass
 
 
 if __name__ == "__main__":  # pragma: no cover — manual smoke only
