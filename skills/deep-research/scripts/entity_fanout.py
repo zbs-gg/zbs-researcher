@@ -27,8 +27,10 @@ Invariants (match the rest of the tool):
 """
 import json
 import re
+import threading
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -411,6 +413,192 @@ def enumerate_entities(topic, n=DEFAULT_N, keys=None, *, tmpdir=None):
         e.pop("_score", None)
 
     return {"topic": topic, "entities": entities, "sources": sources, "coverage": coverage}
+
+
+# ---------------------------------------------------------------------------
+# Fan-out: per-entity, per-channel cells (U2)
+# ---------------------------------------------------------------------------
+class FanoutContext:
+    """Shared state for a fan-out run: the topic, per-cell budget, the reddit
+    topic-subreddits (discovered ONCE), an injectable sleep, per-host locks
+    (U4), and a per-lens usage accumulator (U5). Thread-safe access to locks."""
+
+    def __init__(self, topic, max_items, *, reddit_subs=None, sleep=None):
+        self.topic = topic
+        self.max_items = max_items
+        self.reddit_subs = list(reddit_subs or [])
+        self.sleep = sleep or time.sleep
+        self.usage = {}  # channel -> list[usage dict] (U5)
+        self._host_locks = {}
+        self._guard = threading.Lock()
+
+    def host_lock(self, host):
+        """A process-wide lock per rate-limited host (reused by U4 pacing)."""
+        with self._guard:
+            return self._host_locks.setdefault(host, threading.Lock())
+
+
+def discover_reddit_subs(topic):
+    """Discover the topic's subreddits ONCE (KTD3) — reddit is topic-shaped, so
+    a per-entity name query finds no eponymous subreddit. Degrades to [] on any
+    failure so the reddit column is empty-but-honest, never an abort."""
+    try:
+        return _r("_arctic_shift_discover_subreddits")(topic)
+    except Exception:  # noqa: BLE001 — reddit discovery never aborts the matrix
+        return []
+
+
+def _cell_query(entity, channel):
+    """The per-entity query for a channel.
+
+    github-issues resolves to the entity's repo (`owner/repo` => repo-scoped top
+    issues, the strongest per-entity user-voice signal); every other channel
+    uses the entity name. Name collisions on short names (the U0 "Zep" ->
+    zephyr/zeppelin finding) are filtered downstream by rank_items' relevance
+    floor against the entity name.
+    """
+    if channel == "github-issues" and entity.get("repo"):
+        return entity["repo"]
+    return entity["name"]
+
+
+def _reddit_entity_cell(entity_name, ctx, out_path):
+    """Per-entity reddit dossier: search each pre-discovered topic subreddit for
+    the entity term, rank via rank_items (KTD3). Reuses the runner's
+    arctic-shift helpers; `ctx.reddit_subs` was discovered once from the topic."""
+    subs = ctx.reddit_subs
+    lines = [f"# Reddit — posts mentioning: {entity_name}\n"]
+    if not subs:
+        lines.append(
+            "_No topic subreddits discovered for this run; reddit fan-out "
+            "skipped for this entity._\n"
+        )
+        out_path.write_text("\n".join(lines) + "\n")
+        return 0
+
+    arctic_json = _r("_arctic_shift_json")
+    rank_items = _r("rank_items")
+    base = _r("ARCTIC_SHIFT_BASE")
+    pool_per_sub = _r("_REDDIT_POOL_PER_SUB")
+    window_days = _r("_REDDIT_WINDOW_DAYS")
+
+    after = time.strftime("%Y-%m-%d", time.gmtime(time.time() - window_days * 86400))
+    posts, seen = [], set()
+    for i, sub in enumerate(subs):
+        if i:
+            ctx.sleep(0.5)  # pace the "complex" text-search queries (U4 hardens)
+        url = f"{base}/posts/search?" + urllib.parse.urlencode(
+            {
+                "query": entity_name,
+                "subreddit": sub,
+                "after": after,
+                "limit": pool_per_sub,
+                "sort": "desc",
+                "sort_type": "created_utc",
+                "fields": "id,title,score,num_comments,subreddit,created_utc,selftext,permalink",
+            }
+        )
+        for p in arctic_json(url, timeout=30).get("data") or []:
+            pid = p.get("id")
+            if pid and pid in seen:
+                continue
+            seen.add(pid)
+            p["_rank_text"] = f"{p.get('title') or ''} {(p.get('selftext') or '')[:400]}"
+            posts.append(p)
+
+    scope = ", ".join(f"r/{s}" for s in subs)
+    lines.append(
+        f"_Source: Arctic-Shift archive (free), last year. Scope: {scope}. "
+        f"Query: {entity_name}._\n"
+    )
+    ranked = rank_items(
+        posts,
+        entity_name,
+        text_key="_rank_text",
+        engagement_key="score",
+        comments_key="num_comments",
+        max_items=ctx.max_items,
+    )
+    if not ranked.items:
+        lines.append("_No posts found for this entity in the topic subreddits._\n")
+    for p in ranked.items:
+        lines.append(
+            f"- **{p.get('title','?')}** — ▲{p.get('score',0)}, "
+            f"{p.get('num_comments',0)} comments, r/{p.get('subreddit','?')}"
+        )
+        permalink = p.get("permalink")
+        if permalink:
+            lines.append(f"  - https://www.reddit.com{permalink}")
+    out_path.write_text("\n".join(lines) + "\n")
+    return len(ranked.items)
+
+
+def _invoke_channel(channel, query, out_path, ctx):
+    """Dispatch one non-reddit channel via the registry (R11). Paid lens usage
+    capture is layered in U5; here it is a plain registry call."""
+    fn = _r("CONNECTORS")[channel].fn
+    return fn(query, out_path, ctx.max_items)
+
+
+def _run_cell(cell, out_dir, ctx):
+    """Execute one (entity, channel) cell; degrade to <channel>.ERROR.md on
+    failure so a single cell never kills the matrix (mirrors run_connector)."""
+    entity = cell["entity"]
+    channel = cell["channel"]
+    slug = entity_slug(entity["name"])
+    cell_dir = Path(out_dir) / "entities" / slug
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cell_dir / f"{channel}.md"
+    t0 = time.time()
+    rec = {
+        "entity": entity["name"],
+        "slug": slug,
+        "channel": channel,
+        "tier": cell.get("tier", "free"),
+        "rank": entity.get("rank"),
+    }
+    try:
+        if channel == "reddit":
+            n = _reddit_entity_cell(entity["name"], ctx, out_path)
+        else:
+            n = _invoke_channel(channel, _cell_query(entity, channel), out_path, ctx)
+        size = out_path.stat().st_size if out_path.exists() else 0
+        rec.update(
+            status="ok",
+            items_or_chars=n,
+            seconds=round(time.time() - t0, 2),
+            output_size=size,
+        )
+    except Exception as e:  # noqa: BLE001 — degrade, never kill sibling cells
+        try:
+            out_path.with_suffix(".ERROR.md").write_text(f"ERROR: {e}")
+        except OSError:
+            pass
+        rec.update(status="error", error=str(e)[:200], seconds=round(time.time() - t0, 2))
+    return rec
+
+
+def build_free_cells(entities, channels=FREE_ENTITY_CHANNELS):
+    """One free cell per (entity, channel) — free channels fan out on ALL
+    entities (R3)."""
+    return [
+        {"entity": e, "channel": ch, "tier": "free"}
+        for e in entities
+        for ch in channels
+    ]
+
+
+def run_matrix(cells, out_dir, ctx, *, concurrency=DEFAULT_CONCURRENCY):
+    """Drain the (entity, channel) cell list with a bounded ThreadPoolExecutor
+    (R5, Windows-safe: no fork/signal). Returns one record per cell in submit
+    order. A cell that raises still returns an `error` record (per-cell degrade
+    happens inside _run_cell)."""
+    concurrency = max(1, min(int(concurrency), HARD_CONCURRENCY_CAP))
+    if not cells:
+        return []
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futures = [ex.submit(_run_cell, c, out_dir, ctx) for c in cells]
+        return [f.result() for f in futures]
 
 
 if __name__ == "__main__":  # pragma: no cover — manual smoke only
