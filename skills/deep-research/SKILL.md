@@ -261,7 +261,7 @@ ways, pick whichever is easier — the tool reads both:
    persist). Nothing is written to disk by the tool.
 2. **Key file** — create `<secrets-dir>/<filename>.txt` containing just the key
    (`chmod 600` it). The secrets dir is `DEEP_RESEARCH_SECRETS_DIR` if set,
-   else `~/.config/zbs-research/secrets` (respects `XDG_CONFIG_HOME`).
+   else `~/.config/zbs-researcher/secrets` (respects `XDG_CONFIG_HOME`).
 
 After the user adds a key, **prove it took**: run `python3
 "$SKILL_DIR/scripts/deep-research.py" --diagnose` (shows which providers are
@@ -285,7 +285,7 @@ The full provider → env-var → key-file → where-to-get-it table lives in
   refuses to run until the environment carries
   `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` (exact value). The Telethon
   `*.session` file lives ONLY in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR`
-  or `~/.config/zbs-research/secrets`; chmod 0600 on POSIX) — never inside the project
+  or `~/.config/zbs-researcher/secrets`; chmod 0600 on POSIX) — never inside the project
   or research output tree. Telethon itself is an optional install
   (`pip install telethon`); the connector is off by default — run it with
   `--only telegram`.
@@ -319,7 +319,7 @@ Then write the onboarding marker `<secrets-dir>/onboarding.json` =
 `{"wizard_done": true, "tier": "<highest unlocked>",
 "persona": {"gender": "<f|m|neutral>", "tone": "<business|zbs|neutral|free
 text>"}}`, where the secrets dir is `DEEP_RESEARCH_SECRETS_DIR` or
-`~/.config/zbs-research/secrets`. Use the STEP-2.5 answers; if they were skipped or never
+`~/.config/zbs-researcher/secrets`. Use the STEP-2.5 answers; if they were skipped or never
 reached, write the defaults `{"gender": "neutral", "tone": "business"}`.
 `detect_state` and `--diagnose` surface the persona; old markers without it
 keep working (persona reads as unset, defaults apply).
@@ -451,7 +451,7 @@ caller requested it. Probe and render-only modes allocate no research run.
 ## Tech detail
 
 - Channels run in parallel via threading; ~3–7 min wall-clock (LLM channels dominate; direct channels finish in <2s).
-- Keys read from `~/.config/zbs-research/secrets/{gemini-key,grok-api-key,openai-api-key,perplexity-key}.txt` (or env `GEMINI_API_KEY`, `GROK_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`). The openai-key read is name-tolerant (`openai-api-key.txt` / `openai-key.txt` / `openai.txt`).
+- Keys read from `~/.config/zbs-researcher/secrets/{gemini-key,grok-api-key,openai-api-key,perplexity-key}.txt` (or env `GEMINI_API_KEY`, `GROK_API_KEY`, `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`). The openai-key read is name-tolerant (`openai-api-key.txt` / `openai-key.txt` / `openai.txt`).
 - OpenAI channel (**opt-in only**) uses gpt-5.4 (non-Pro) via `api.openai.com/v1/responses`. It bills the OpenAI API, so it is not in the default set — enable with `--only openai` on your explicit OK. Pro models are never used; that spend is reserved for `emergency-pro`.
 - Perplexity uses `sonar` (env `PERPLEXITY_RESEARCH_MODEL` to override).
 - If a channel fails (quota, network, key, throttle) it writes `<name>.ERROR.md` and records the error in `manifest.json`; other channels continue.
@@ -476,9 +476,9 @@ caller requested it. Probe and render-only modes allocate no research run.
 ## Adding more connectors
 
 - TikTok / Instagram transcripts need a ScrapeCreators key → drop it in
-  `~/.config/zbs-research/secrets/scrapecreators-key.txt` (or `SCRAPECREATORS_KEY`) and
+  `~/.config/zbs-researcher/secrets/scrapecreators-key.txt` (or `SCRAPECREATORS_KEY`) and
   add a `direct` connector in the registry.
-- Brave Search → `~/.config/zbs-research/secrets/brave-key.txt` (or `BRAVE_API_KEY`).
+- Brave Search → `~/.config/zbs-researcher/secrets/brave-key.txt` (or `BRAVE_API_KEY`).
 - Each new connector: add one `channel_*` function + a `Connector(...)` line
   in the registry + an entry in `OUTPUT_NAMES`. The runner, `--only/--skip`,
   `--list-connectors`, and manifest pick it up automatically.

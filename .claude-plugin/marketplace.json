@@ -1,5 +1,5 @@
 {
-  "name": "zbs-research",
+  "name": "zbs-researcher",
   "owner": {
     "name": "Nikita Shilov",
     "url": "https://github.com/nkkmnk"
@@ -18,7 +18,7 @@
       },
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/zbs-gg/zbs-research"
+      "homepage": "https://github.com/zbs-gg/zbs-researcher"
     }
   ]
 }

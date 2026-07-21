@@ -1,7 +1,7 @@
 {
   "name": "zbs-researcher",
-  "version": "0.1.0",
-  "description": "One-command installer for the ZBS Researcher (deep-research) Claude Code plugin: adds the zbs-research marketplace and installs the plugin.",
+  "version": "0.1.1",
+  "description": "One-command installer for the ZBS Researcher (deep-research) Claude Code plugin: adds the zbs-researcher marketplace and installs the plugin.",
   "bin": {
     "zbs-researcher": "./bin/cli.js"
   },
@@ -14,7 +14,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zbs-gg/zbs-research.git",
+    "url": "git+https://github.com/zbs-gg/zbs-researcher.git",
     "directory": "installer"
   },
   "keywords": [

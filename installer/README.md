@@ -12,8 +12,8 @@ The installer is a thin shim. It runs exactly two commands — and prints them
 before asking for confirmation:
 
 ```
-claude plugin marketplace add zbs-gg/zbs-research
-claude plugin install deep-research@zbs-research
+claude plugin marketplace add zbs-gg/zbs-researcher
+claude plugin install deep-research@zbs-researcher
 ```
 
 Then it verifies the install via `claude plugin list` and tells you the next
@@ -64,4 +64,4 @@ have it.
 ZBS Researcher is a plan-first, project-local, multi-channel deep-research
 runner for Claude Code — LLM lenses + free direct connectors + Claude
 synthesis, with no Anthropic/OpenAI API spend by default.
-Source: https://github.com/zbs-gg/zbs-research
+Source: https://github.com/zbs-gg/zbs-researcher

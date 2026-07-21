@@ -25,8 +25,8 @@ npx -y zbs-researcher@latest
 No node — the same two commands the installer runs (node not required):
 
 ```bash
-claude plugin marketplace add zbs-gg/zbs-research
-claude plugin install deep-research@zbs-research
+claude plugin marketplace add zbs-gg/zbs-researcher
+claude plugin install deep-research@zbs-researcher
 ```
 
 **No node?** Install [Node.js LTS](https://nodejs.org) for the
@@ -140,11 +140,11 @@ you opt in.
 
 ```bash
 # from the marketplace
-claude plugin marketplace add zbs-gg/zbs-research
-claude plugin install deep-research@zbs-research
+claude plugin marketplace add zbs-gg/zbs-researcher
+claude plugin install deep-research@zbs-researcher
 
 # or test locally without installing
-claude --plugin-dir /path/to/zbs-research
+claude --plugin-dir /path/to/zbs-researcher
 ```
 
 Then the skill is available as `/deep-research:deep-research` (Claude also

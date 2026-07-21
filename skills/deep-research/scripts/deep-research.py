@@ -128,7 +128,7 @@ from connectors.tiktok_ig import channel_tiktok_ig
 _market_radar_pkg.attach_runner(globals())
 
 # Where per-provider key files live. Defaults to a neutral XDG config dir
-# (~/.config/zbs-research/secrets), overridable via DEEP_RESEARCH_SECRETS_DIR —
+# (~/.config/zbs-researcher/secrets), overridable via DEEP_RESEARCH_SECRETS_DIR —
 # or skip files entirely and use env vars (GEMINI_API_KEY, GROK_API_KEY,
 # OPENAI_API_KEY, PERPLEXITY_API_KEY, OPENROUTER_API_KEY), which read_key()
 # falls back to.
@@ -139,9 +139,9 @@ def _default_secrets_dir():
     if override:
         return Path(override).expanduser()
     base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
-    return Path(base).expanduser() / "zbs-research" / "secrets"
+    return Path(base).expanduser() / "zbs-researcher" / "secrets"
 SECRETS = _default_secrets_dir()
-UA = "deep-research/2.0 (+https://github.com/zbs-gg/zbs-research)"
+UA = "deep-research/2.0 (+https://github.com/zbs-gg/zbs-researcher)"
 
 
 def read_key(filenames, prefix_pattern, env_var=None):

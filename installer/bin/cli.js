@@ -16,8 +16,8 @@
 const { execSync, spawn } = require("node:child_process");
 const readline = require("node:readline");
 
-const MARKETPLACE_CMD = "claude plugin marketplace add zbs-gg/zbs-research";
-const INSTALL_CMD = "claude plugin install deep-research@zbs-research";
+const MARKETPLACE_CMD = "claude plugin marketplace add zbs-gg/zbs-researcher";
+const INSTALL_CMD = "claude plugin install deep-research@zbs-researcher";
 const INSTALL_LINK = "https://code.claude.com/docs";
 
 // Banner art mirrors skills/deep-research/scripts/term_ui.py — visual parity

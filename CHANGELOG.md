@@ -18,9 +18,9 @@ ZBS Researcher: persona, CLI polish, npx installer, showcase.
   (`npx -y zbs-researcher@latest`) detects the `claude` CLI, adds the
   marketplace, installs the plugin, and prints next steps. Prepared here;
   npm publication is a separate manual action.
-- **Marketplace renamed** `deep-research-skill` → `zbs-research` (plugin id
+- **Marketplace renamed** `deep-research-skill` → `zbs-researcher` (plugin id
   unchanged). Migration: installs registered under the old marketplace name
-  should re-add it as `zbs-gg/zbs-research`.
+  should re-add it as `zbs-gg/zbs-researcher`.
 - **Showcase docs**: README showcase top, `docs/demo-script.md` (demo-video
   shot list), `docs/site-brief.md` (hand-off brief for an external site
   effort).
