@@ -12,6 +12,8 @@ live here too.
 All network is mocked — no live calls, no paid calls.
 """
 import importlib.util
+import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -20,6 +22,7 @@ import types
 import unittest
 import urllib.error
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -321,6 +324,100 @@ class TieringTest(unittest.TestCase):
         free, paid = self._counts(cells)
         self.assertEqual(free, 8)   # 4 x 2 free channels — untouched by budget
         self.assertEqual(paid, 0)   # budget 0 => no paid cells
+
+
+class PlanCheckChannel:
+    """Records whether research-plan.md already existed when the cell fired."""
+
+    def __init__(self):
+        self.plan_present_at_call = []
+
+    def __call__(self, query, out_path, max_items):
+        run_dir = Path(out_path).parents[2]  # out_dir/entities/<slug>/<ch>.md
+        self.plan_present_at_call.append((run_dir / "research-plan.md").exists())
+        Path(out_path).write_text(f"# {query}\n- x\n", encoding="utf-8")
+        return 1
+
+
+class RunEntityFanoutTest(unittest.TestCase):
+    """U6 — run_entity_fanout orchestration + plan-first ordering."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_plan_written_before_cells_and_artifacts_produced(self):
+        ents = [entity("mem0", 0, repo="mem0ai/mem0"), entity("zep", 1)]
+        enum = {"topic": "t", "entities": ents,
+                "sources": {"github": "ok"}, "coverage": "repo-shaped topic"}
+        hn, ghi = PlanCheckChannel(), PlanCheckChannel()
+        runner = FakeRunner({"hackernews": hn, "github-issues": ghi})
+        entity_fanout.attach_runner(runner.as_globals())
+        with mock.patch.object(entity_fanout, "enumerate_entities", return_value=enum):
+            agg = entity_fanout.run_entity_fanout(
+                "LLM agent memory", self.tmp, {}, n=50, k=10,
+                free_channels=("hackernews", "github-issues"),
+            )
+        # plan-first: research-plan.md existed before every cell ran
+        self.assertTrue(all(hn.plan_present_at_call))
+        self.assertTrue(all(ghi.plan_present_at_call))
+        for name in ("research-plan.md", "matrix.json", "manifest.json"):
+            self.assertTrue((Path(self.tmp) / name).exists(), name)
+        self.assertEqual(agg["manifest"]["entities"], 2)
+        self.assertEqual(agg["manifest"]["paid_calls"], 0)  # no lens keys
+        # research-plan.md carries the computed call budget
+        plan = (Path(self.tmp) / "research-plan.md").read_text()
+        self.assertIn("Call budget", plan)
+        self.assertIn("free cells", plan)
+
+    def test_empty_entities_clean_run(self):
+        enum = {"topic": "t", "entities": [], "sources": {"github": "ok"}, "coverage": "none"}
+        runner = FakeRunner({"hackernews": PlanCheckChannel()})
+        entity_fanout.attach_runner(runner.as_globals())
+        with mock.patch.object(entity_fanout, "enumerate_entities", return_value=enum):
+            agg = entity_fanout.run_entity_fanout(
+                "t", self.tmp, {}, free_channels=("hackernews",)
+            )
+        self.assertEqual(agg["manifest"]["entities"], 0)
+        self.assertEqual(agg["matrix"], [])
+        self.assertTrue((Path(self.tmp) / "research-plan.md").exists())
+
+
+class CliValidationTest(unittest.TestCase):
+    """U6 — --mode entity-fanout flag validation (errors fire before any
+    network, so these subprocess runs never hit the wire)."""
+
+    RUNNER = str(SCRIPTS / "deep-research.py")
+
+    def _run(self, *extra):
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        return subprocess.run(
+            [sys.executable, self.RUNNER, "topic", "--mode", "entity-fanout", *extra],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+
+    def test_k_greater_than_n_errors(self):
+        r = self._run("--entities-n", "3", "--top-k", "5", "--output-dir", tempfile.mkdtemp())
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("top-k", r.stderr)
+
+    def test_negative_concurrency_errors(self):
+        r = self._run("--concurrency", "0", "--output-dir", tempfile.mkdtemp())
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("concurrency", r.stderr)
+
+    def test_negative_paid_budget_errors(self):
+        r = self._run("--paid-budget", "-1", "--output-dir", tempfile.mkdtemp())
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("paid-budget", r.stderr)
+
+    def test_mode_flag_recognized(self):
+        # --help lists the entity-fanout mode (no network, exits 0)
+        r = subprocess.run(
+            [sys.executable, self.RUNNER, "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("entity-fanout", r.stdout)
 
 
 def http_error(code):

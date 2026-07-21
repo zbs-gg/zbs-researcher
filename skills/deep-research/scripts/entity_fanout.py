@@ -833,6 +833,90 @@ def aggregate_matrix(enum_result, records, *, topic, started, finished,
     return {"matrix": matrix, "manifest": manifest}
 
 
+# ---------------------------------------------------------------------------
+# Plan-first + orchestration entrypoint (U6)
+# ---------------------------------------------------------------------------
+def write_research_plan(out_dir, topic, enum_result, plan_report, free_channels):
+    """Write research-plan.md BEFORE any fan-out fires (R13): the enumerated
+    entity list, the per-entity channel plan, and the exact computed call
+    budget. This is the plan-first contract for entity-fanout mode."""
+    n = plan_report["n"]
+    lenses = plan_report.get("available_lenses") or []
+    lines = [
+        f"# Research plan — entity fan-out: {topic}\n",
+        f"_Mode: entity-fanout. {n} entities enumerated. "
+        f"Coverage: {enum_result.get('coverage')}._\n",
+        "## Call budget (computed before firing)\n",
+        f"- free cells: **{plan_report['free_cells']}** "
+        f"({n} entities x {len(free_channels)} free channels: {', '.join(free_channels)})",
+        f"- paid cells: **{plan_report['paid_cells']}** "
+        f"(lenses: {', '.join(lenses) or 'none'}; budget {plan_report['paid_budget']}; "
+        f"paid_all={plan_report['paid_all']}; trimmed {plan_report['paid_trimmed']})",
+        "\n## Enumeration sources\n",
+    ]
+    for src, status in (enum_result.get("sources") or {}).items():
+        lines.append(f"- {src}: {status}")
+    lines.append("\n## Entities (rank order)\n")
+    if not enum_result["entities"]:
+        lines.append("_No entities enumerated for this topic._")
+    for e in enum_result["entities"]:
+        star = f" ★{e['stars']:,}" if e.get("stars") else ""
+        repo = f" `{e['repo']}`" if e.get("repo") else ""
+        srcs = ", ".join(e.get("sources", []))
+        lines.append(f"{e['rank'] + 1}. **{e['name']}**{repo}{star} — {srcs}")
+    (Path(out_dir) / "research-plan.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
+                      concurrency=DEFAULT_CONCURRENCY, paid_budget=None,
+                      paid_all=False, max_items=10,
+                      free_channels=FREE_ENTITY_CHANNELS, lenses=PAID_LENSES):
+    """Full entity-fanout run: enumerate -> plan (+ write research-plan.md) ->
+    fan out -> aggregate. Writes research-plan.md (before firing), matrix.json,
+    manifest.json, and brief.html into out_dir. Returns the aggregate dict.
+
+    The run directory is caller-owned (the CLI self-allocates it); this function
+    does not consume an agent-prepared run — that path stays single-mode only.
+    """
+    keys = keys or {}
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    started = time.strftime("%Y-%m-%dT%H:%M:%S")
+    t0 = time.time()
+
+    reddit_subs = discover_reddit_subs(topic) if "reddit" in free_channels else []
+    ctx = FanoutContext(topic, max_items, reddit_subs=reddit_subs)
+
+    enum = enumerate_entities(topic, n=n, keys=keys, tmpdir=str(out_dir))
+    cells, plan_report = plan_cells(
+        enum["entities"], keys, free_channels=free_channels, lenses=lenses,
+        k=k, paid_all=paid_all, paid_budget=paid_budget,
+    )
+    # plan-first: the plan (with the exact call budget) lands before any cell.
+    write_research_plan(out_dir, topic, enum, plan_report, free_channels)
+
+    records = run_matrix(cells, out_dir, ctx, concurrency=concurrency)
+    finished = time.strftime("%Y-%m-%dT%H:%M:%S")
+    agg = aggregate_matrix(
+        enum, records, topic=topic, started=started, finished=finished,
+        wall_seconds=time.time() - t0, plan_report=plan_report,
+    )
+    (out_dir / "matrix.json").write_text(json.dumps(agg["matrix"], indent=2), encoding="utf-8")
+    (out_dir / "manifest.json").write_text(json.dumps(agg["manifest"], indent=2), encoding="utf-8")
+    _maybe_render_brief(out_dir, topic, agg)
+    return agg
+
+
+def _maybe_render_brief(out_dir, topic, agg):
+    """Render brief.html when the U7 renderer is present (wired in U7)."""
+    renderer = globals().get("render_entity_brief")
+    if renderer is not None:
+        try:
+            renderer(out_dir, topic, agg)
+        except Exception:  # noqa: BLE001 — a brief failure never fails the run
+            pass
+
+
 if __name__ == "__main__":  # pragma: no cover — manual smoke only
     import sys
 

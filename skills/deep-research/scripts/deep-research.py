@@ -1352,6 +1352,83 @@ def _import_sibling(name):
         return importlib.import_module(name)
 
 
+def run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap):
+    """Entity-fanout mode entrypoint (KTD1/R13): self-allocate a run directory,
+    write research-plan.md before firing, fan out per entity across channels,
+    aggregate the entity x channel dossier matrix. Reuses this module's registry
+    + helpers via entity_fanout.attach_runner (the hyphenated filename cannot be
+    imported back into, so injection mirrors connectors/__init__.py)."""
+    entity_fanout = _import_sibling("entity_fanout")
+    n = args.entities_n if args.entities_n is not None else entity_fanout.DEFAULT_N
+    concurrency = (
+        args.concurrency if args.concurrency is not None else entity_fanout.DEFAULT_CONCURRENCY
+    )
+    max_items = args.max_items if args.max_items is not None else 10
+
+    if n < 1:
+        ap.error("--entities-n must be >= 1")
+    # Explicit --top-k above N is a user error; a defaulted K just clamps to N.
+    if args.top_k is not None:
+        k = args.top_k
+        if k < 0:
+            ap.error("--top-k must be >= 0")
+        if k > n:
+            ap.error(f"--top-k ({k}) cannot exceed --entities-n ({n})")
+    else:
+        k = min(entity_fanout.DEFAULT_K, n)
+    if concurrency < 1:
+        ap.error("--concurrency must be >= 1")
+    if args.paid_budget is not None and args.paid_budget < 0:
+        ap.error("--paid-budget must be >= 0")
+
+    # Self-allocate the run directory — entity-fanout owns its run and does NOT
+    # use the single-mode --prepared-run handshake (R13).
+    try:
+        if args.output_dir is not None:
+            out_dir = resolve_output_directory(args.output_dir, launch_cwd)
+            out_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            project_root = resolve_project_root(launch_cwd, args.project_root)
+            out_dir = allocate_run_directory(project_root, topic)
+        (out_dir / "_topic.txt").write_text(topic + "\n", encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        ap.error(str(exc))
+
+    if show_banner:
+        print(term_ui.banner(caps), file=sys.stderr)
+    print(
+        f"[entity-fanout] topic={topic!r} N={n} K={k} concurrency={concurrency}"
+        + (" paid-all" if args.paid_all else ""),
+        file=sys.stderr,
+    )
+
+    entity_fanout.attach_runner(globals())
+    agg = entity_fanout.run_entity_fanout(
+        topic,
+        out_dir,
+        KEYS,
+        n=n,
+        k=k,
+        concurrency=concurrency,
+        paid_budget=args.paid_budget,
+        paid_all=args.paid_all,
+        max_items=max_items,
+    )
+    m = agg["manifest"]
+    tag = " [DEGRADED — rate limits]" if m.get("degraded") else ""
+    print(
+        f"[entity-fanout] {m['entities']} entities, "
+        f"{m['cells_ok']} cells ok / {m['cells_error']} error, "
+        f"paid_calls={m['paid_calls']}, tokens real={m['tokens_real']} est={m['tokens_est']}, "
+        f"{m['wall_seconds']}s{tag}",
+        file=sys.stderr,
+    )
+    print(f"\nEntity-fanout done. Output: {out_dir}", file=sys.stderr)
+    for f in sorted(out_dir.iterdir()):
+        if f.is_file():
+            print(f"  {f.name}: {f.stat().st_size} bytes", file=sys.stderr)
+
+
 def main():
     process_cwd = Path.cwd().resolve()
     ap = argparse.ArgumentParser(
@@ -1374,6 +1451,24 @@ def main():
     ap.add_argument("--only", help="comma list: run ONLY these connectors")
     ap.add_argument("--skip", help="comma list: skip these connectors")
     ap.add_argument("--max-items", type=int, help="items per direct channel (default 10)")
+    # Entity fan-out deep mode (default 'single' = today's behavior, unchanged).
+    ap.add_argument(
+        "--mode",
+        choices=["single", "entity-fanout"],
+        default="single",
+        help="single (default: one blanket query per channel) or entity-fanout "
+        "(enumerate top-N entities, fan out per entity across channels)",
+    )
+    ap.add_argument("--entities-n", type=int, metavar="N",
+                    help="entity-fanout: entities to enumerate (default 50, hard cap 200)")
+    ap.add_argument("--top-k", type=int, metavar="K",
+                    help="entity-fanout: top-K entities that get paid lenses (default 10)")
+    ap.add_argument("--concurrency", type=int, metavar="C",
+                    help="entity-fanout: max parallel cells (default 6, cap 16)")
+    ap.add_argument("--paid-budget", type=int, metavar="B",
+                    help="entity-fanout: hard ceiling on paid lens calls (default K x available lenses)")
+    ap.add_argument("--paid-all", action="store_true",
+                    help="entity-fanout: run paid lenses on ALL N entities (raises the budget)")
     ap.add_argument(
         "--prepared-run",
         action="store_true",
@@ -1462,6 +1557,10 @@ def main():
 
     if args.only and args.skip:
         ap.error("--only and --skip cannot be used together")
+
+    if args.mode == "entity-fanout":
+        run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap)
+        return
 
     if args.prepared_run and args.output_dir is None:
         ap.error("--prepared-run requires --output-dir")
