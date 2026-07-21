@@ -29,8 +29,8 @@ const ART_LINES = [
   "█    █  █    █    █ █  █       █ █    █  █ █ █  █    █  █ █    █ █",
   "████ ███  ███     █  █ ████ ███  ████ █  █ █  █  ███ █  █ ████ █  █",
 ];
-const SUBTITLE = "                  заебись-ресёрчер · deep research";
-const PLAIN_TITLE = "ZBS RESEARCHER — заебись-ресёрчер";
+const SUBTITLE = "                  deep research · reactions from real humans";
+const PLAIN_TITLE = "ZBS RESEARCHER — deep research";
 const ART_MIN_COLUMNS = 78;
 const SPINNER_FRAMES = ["|", "/", "-", "\\"];
 const SPINNER_INTERVAL_MS = 120;
@@ -70,7 +70,7 @@ function banner() {
 }
 
 function printPlannedCommands() {
-  console.log("Команды, которые будут выполнены / commands to run:");
+  console.log("Commands to run:");
   console.log("  1. " + MARKETPLACE_CMD);
   console.log("  2. " + INSTALL_CMD);
 }
@@ -105,7 +105,7 @@ function confirm() {
       output: process.stderr,
     });
     let answered = false;
-    rl.question("Продолжить? / Proceed? [y/N] ", (answer) => {
+    rl.question("Proceed? [y/N] ", (answer) => {
       answered = true;
       rl.close();
       resolve(/^y(es)?$/i.test(answer.trim()));
@@ -210,9 +210,6 @@ async function main() {
   }
 
   console.log(
-    "Установит плагин deep-research (ZBS Researcher) в Claude Code."
-  );
-  console.log(
     "Installs the deep-research (ZBS Researcher) plugin into Claude Code."
   );
   console.log("");
@@ -220,19 +217,16 @@ async function main() {
   console.log("");
 
   if (flags.dryRun) {
-    console.log("(dry run — ничего не выполнено / nothing executed)");
+    console.log("(dry run — nothing executed)");
     return 0;
   }
 
   if (!hasClaude()) {
     console.log(
-      "Не нашла `claude` CLI в PATH. / Could not find the `claude` CLI on PATH."
+      "Could not find the `claude` CLI on PATH."
     );
-    console.log("Установи Claude Code: / Install Claude Code first:");
+    console.log("Install Claude Code first:");
     console.log("  " + INSTALL_LINK);
-    console.log(
-      "Потом выполни две команды выше вручную — или снова запусти этот установщик."
-    );
     console.log(
       "Then run the two commands above manually — or re-run this installer."
     );
@@ -243,17 +237,17 @@ async function main() {
     if (!process.stdin.isTTY) {
       // Non-interactive stdin (pipe/EOF): never hang on a prompt.
       console.log(
-        "Неинтерактивный ввод — ничего не выполнено. / Non-interactive stdin — nothing executed."
+        "Non-interactive stdin — nothing executed."
       );
       console.log(
-        "Запусти с --yes чтобы выполнить. / Run with --yes to execute."
+        "Run with --yes to execute."
       );
       return 0;
     }
     const proceed = await confirm();
     if (!proceed) {
       console.log(
-        "Отменено — ничего не выполнено. / Cancelled — nothing executed."
+        "Cancelled — nothing executed."
       );
       return 0;
     }
@@ -266,12 +260,12 @@ async function main() {
       process.stderr.write(
         paint(
           "2",
-          "  (маркетплейс уже добавлен — продолжаю / marketplace already added — continuing)"
+          "  (marketplace already added — continuing)"
         ) + "\n"
       );
     } else {
       console.log(
-        "Не получилось добавить маркетплейс. / Failed to add the marketplace."
+        "Failed to add the marketplace."
       );
       return 1;
     }
@@ -284,12 +278,12 @@ async function main() {
       process.stderr.write(
         paint(
           "2",
-          "  (плагин уже установлен — продолжаю / plugin already installed — continuing)"
+          "  (plugin already installed — continuing)"
         ) + "\n"
       );
     } else {
       console.log(
-        "Не получилось установить плагин. / Failed to install the plugin."
+        "Failed to install the plugin."
       );
       return 1;
     }
@@ -308,22 +302,18 @@ async function main() {
   }
   if (listing === null) {
     console.log(
-      "Команды прошли, но проверка через `claude plugin list` не удалась — проверь вручную."
-    );
-    console.log(
-      "Commands succeeded, but verification via `claude plugin list` failed — check manually."
+      "Commands ran, but verification via `claude plugin list` failed — check manually."
     );
     return 0;
   }
   if (!/deep-research/i.test(listing)) {
     console.log(
-      "Плагин не виден в `claude plugin list` — проверь вручную. / Plugin not visible in `claude plugin list` — check manually."
+      "Plugin not visible in `claude plugin list` — check manually."
     );
     return 1;
   }
 
   console.log("");
-  console.log("Готово! Открой Claude Code и скажи: запусти deep research");
   console.log("Done! Open Claude Code and say: run deep research");
   return 0;
 }

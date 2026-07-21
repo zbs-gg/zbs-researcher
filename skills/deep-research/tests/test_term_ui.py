@@ -424,7 +424,7 @@ class BannerTests(unittest.TestCase):
         for line in lines:
             self.assertLessEqual(len(strip_sgr(line)), 78)
         self.assertIn("█", out)
-        self.assertIn("заебись-ресёрчер", out)
+        self.assertIn("reactions from real humans", out)
         self.assertIn("deep research", out)
 
     def test_banner_colored_only_when_caps_color(self):
@@ -435,7 +435,7 @@ class BannerTests(unittest.TestCase):
         self.assertEqual(strip_sgr(colored), colorless)
 
     def test_plain_title_names_the_persona(self):
-        self.assertEqual(term_ui.PLAIN_TITLE, "ZBS RESEARCHER — заебись-ресёрчер")
+        self.assertEqual(term_ui.PLAIN_TITLE, "ZBS RESEARCHER — deep research")
 
 
 class SourceHygieneTests(unittest.TestCase):

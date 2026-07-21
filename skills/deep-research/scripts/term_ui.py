@@ -47,8 +47,8 @@ __all__ = [
 
 Caps = namedtuple("Caps", ("tier", "color", "animate"))
 
-PLAIN_TITLE = "ZBS RESEARCHER — заебись-ресёрчер"
-SUBTITLE = "заебись-ресёрчер · deep research"
+PLAIN_TITLE = "ZBS RESEARCHER — deep research"
+SUBTITLE = "deep research · reactions from real humans"
 ART_MIN_COLUMNS = 78
 
 BRAILLE_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")

@@ -4,41 +4,39 @@
  █   ███   ██     ███  ███   ██  ███  ████ ███  █    ████ ███  ███
 █    █  █    █    █ █  █       █ █    █  █ █ █  █    █  █ █    █ █
 ████ ███  ███     █  █ ████ ███  ████ █  █ █  █  ███ █  █ ████ █  █
-                  заебись-ресёрчер · deep research
+                  deep research · reactions from real humans
 ```
 
 # ZBS Researcher
 
-**ZBS Researcher («Заебись-Ресёрчер») — глубокий multi-source ресёрч с
-реакциями живых людей: минуты до первого отчёта · $0 · ноль ключей.**
+**ZBS Researcher — deep, multi-source research with reactions from real
+humans: minutes to your first report, $0, zero keys to start.**
 Deep multi-source research with live people's reactions — HN, Reddit,
 GitHub, Polymarket, Threads and a dozen more channels pulled in parallel, a
 research plan written before every run, and a shareable HTML brief at the
 end. Minutes to the first report, $0 by default, zero keys to start.
 
-## Установка в одну команду / One-command install
+## One-command install
 
 ```bash
 npx -y zbs-researcher@latest
 ```
 
-Без node — те же две команды, которые выполняет инсталлер (node не нужен):
+No node — the same two commands the installer runs (node not required):
 
 ```bash
 claude plugin marketplace add zbs-gg/zbs-research
 claude plugin install deep-research@zbs-research
 ```
 
-**Нет node?** → Поставь [Node.js LTS](https://nodejs.org) для
-npx-однострочника — или пропусти node вовсе: двум нативным командам выше
-нужен только `claude` CLI. / No node? Install
-[Node.js LTS](https://nodejs.org) for the one-liner, or skip node entirely —
-the two native commands above need only the `claude` CLI.
+**No node?** Install [Node.js LTS](https://nodejs.org) for the
+npx one-liner, or skip node entirely — the two native commands above need
+only the `claude` CLI.
 
-## Демо / Demo
+## Demo
 
-*(скоро здесь: GIF живого борда из терминала + скрин первого вопроса
-визарда / coming soon: live-board GIF + wizard screenshot)*
+*(coming soon: live-board GIF from a terminal + screenshot of the wizard's
+first question)*
 
 <!--
 CAPTURE (board GIF): record in a REAL terminal — a live TTY at >= 80
@@ -57,7 +55,7 @@ docs/assets/board.gif and uncomment:
 
 <!--
 CAPTURE (persona screenshot): open Claude Code in a fresh project with the
-plugin installed and say «запусти deep research». Screenshot the FIRST
+plugin installed and say "run deep research". Screenshot the FIRST
 wizard question — the one where ZBS Researcher introduces itself by name
 with the Auto / Manual / Skip options. Save as
 docs/assets/persona-hello.png and uncomment:
@@ -65,19 +63,18 @@ docs/assets/persona-hello.png and uncomment:
 ![ZBS Researcher introduces itself in Claude Code](docs/assets/persona-hello.png)
 -->
 
-## Тиры — коротко / Tiers at a glance
+## Tiers at a glance
 
-- **Tier 0 — бесплатно, без ключей**: HN, hiring-signal, Polymarket,
+- **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket,
   GitHub, github-issues, Reddit, Bluesky, launch-radar, revenue-radar.
-- **Tier 1 — свои ключи**: LLM-линзы Gemini / Grok / Perplexity.
-- **Tier 2 — один ключ OpenRouter**: все три дефолтные LLM-линзы разом.
+- **Tier 1 — your own keys**: LLM lenses Gemini / Grok / Perplexity.
+- **Tier 2 — one OpenRouter key**: all three default LLM lenses at once.
 - **Opt-in**: Telegram · TikTok/IG · Threads · Meta Ads.
 
-Полная таблица каналов — в [Connectors](#connectors) ниже.
+The full channel table is in [Connectors](#connectors) below.
 
-**Что и куда уходит — прозрачно:** коннекторы отправляют на публичные
-эндпоинты только текст твоего запроса и ничего больше; полный
-per-connector разбор — в
+**What goes where — transparent:** connectors send only your query text to
+public endpoints and nothing else; the full per-connector breakdown is in
 [CONFIGURATION.md](CONFIGURATION.md#security--transparency--what-it-does-what-it-sends-where).
 
 ## What it is (plugin id: `deep-research`)

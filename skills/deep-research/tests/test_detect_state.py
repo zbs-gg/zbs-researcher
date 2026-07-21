@@ -122,7 +122,7 @@ class DetectStateTests(unittest.TestCase):
     def test_marker_persona_is_surfaced_verbatim(self):
         personas = (
             {"gender": "f", "tone": "zbs"},
-            {"gender": "neutral", "tone": "пиратский сленг, но вежливо"},
+            {"gender": "neutral", "tone": "pirate slang, but polite"},
         )
         for persona in personas:
             with self.subTest(persona=persona), tempfile.TemporaryDirectory() as tmp:

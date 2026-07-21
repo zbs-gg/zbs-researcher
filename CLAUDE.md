@@ -1,31 +1,31 @@
 # zbs-research — Claude Code project instructions
 
-Deep-research Claude Code plugin (skill `deep-research`): многоканальный ресёрч-раннер — LLM-линзы (Gemini/Grok/Perplexity, OpenAI opt-in, OpenRouter Tier-2) + бесплатные direct-коннекторы (HN, hiring, Polymarket, GitHub, github-issues, Reddit via Arctic-Shift, Bluesky, launch-radar, revenue-radar, Meta Ads, Telegram, TikTok/IG, Threads) + разговорный onboarding-мастер.
+Deep-research Claude Code plugin (skill `deep-research`): a multi-channel research runner — LLM lenses (Gemini/Grok/Perplexity, OpenAI opt-in, OpenRouter Tier-2) + free direct connectors (HN, hiring, Polymarket, GitHub, github-issues, Reddit via Arctic-Shift, Bluesky, launch-radar, revenue-radar, Meta Ads, Telegram, TikTok/IG, Threads) + a conversational onboarding wizard.
 
-## Карта репо
+## Repo map
 
-- `skills/deep-research/SKILL.md` — скилл + onboarding-мастер (STEP-флоу).
-- `skills/deep-research/scripts/deep-research.py` — раннер: реестр `Connector`, `KEYS`/`read_key()`, каналы, ranking-хелперы, `--diagnose`, `--signal`, `--list-connectors`.
-- `skills/deep-research/scripts/connectors/` — пакет коннекторов (late-binding через `attach_runner`; общие хелперы в `__init__.py`).
-- `skills/deep-research/scripts/detect_state.py` — SessionStart-хук (регистрируется в корневом `hooks/hooks.json`): JSON с булевыми провайдерами, никогда не выводит значения ключей.
-- `skills/deep-research/tests/` — unittest-сьюита.
-- `docs/plans/2026-07-17-002-feat-zbs-research-onboarding-wizard-plan.md` — действующий план (unified plan, R1–R23, U1–U15).
+- `skills/deep-research/SKILL.md` — the skill + onboarding wizard (STEP flow).
+- `skills/deep-research/scripts/deep-research.py` — the runner: `Connector` registry, `KEYS`/`read_key()`, channels, ranking helpers, `--diagnose`, `--signal`, `--list-connectors`.
+- `skills/deep-research/scripts/connectors/` — the connectors package (late-binding via `attach_runner`; shared helpers in `__init__.py`).
+- `skills/deep-research/scripts/detect_state.py` — SessionStart hook (registered in the root `hooks/hooks.json`): emits JSON with boolean providers, never prints key values.
+- `skills/deep-research/tests/` — unittest suite.
+- `docs/plans/2026-07-17-002-feat-zbs-research-onboarding-wizard-plan.md` — the active plan (unified plan, R1–R23, U1–U15).
 
-## Как запускать проверки
+## How to run checks
 
 ```bash
 cd skills/deep-research
-python3 -m unittest discover -s tests -p 'test_*.py'   # вся сьюита
-bash scripts/selftest.sh                                # 10-шаговый smoke, платные API не вызывает
+python3 -m unittest discover -s tests -p 'test_*.py'   # the whole suite
+bash scripts/selftest.sh                                # 10-step smoke, does not call paid APIs
 ```
 
-**Никогда не запускай `unittest discover` из корня репо** — глобальный site-packages содержит чужой пакет `tests`, который затеняет наш.
+**Never run `unittest discover` from the repo root** — the global site-packages contains a foreign `tests` package that shadows ours.
 
-## Жёсткие правила
+## Hard rules
 
-- **Бюджет-инвариант (R17):** дефолтный запуск не бьёт в Anthropic/OpenAI API; OpenAI — только явный opt-in. Платные вызовы (OpenRouter, вендоры) — никогда в тестах, в рантайме только при явно настроенных ключах.
-- **Stdlib-only** (urllib, threading). Telethon/MLX — только ленивые опциональные импорты.
-- **Windows-safe (R18):** никаких `signal.SIGALRM`, `os.killpg`, `fcntl`, `pty`, `os.fork`; только threading. Selftest это грепает.
-- **Секреты:** ключи через `DEEP_RESEARCH_SECRETS_DIR` (дефолт `~/.config/zbs-research/secrets`) или env; никакого ключевого материала в выводах, логах и сообщениях об ошибках.
-- **SKILL.md контракт selftest:** первые вхождения маркеров `## STEP 0 — RESEARCH PLAN` → `--allocate-run` → `research-plan.md` → `--output-dir "$RUN_DIR"` → `synthesis.md` обязаны идти в этом порядке; литерал `${CLAUDE_PLUGIN_ROOT}` в SKILL.md запрещён (в `hooks/hooks.json` — обязателен).
-- Graceful degrade: канал падает → `<name>.ERROR.md`, соседи продолжают. Не ломать этот паттерн.
+- **Budget invariant (R17):** the default run does not hit the Anthropic/OpenAI API; OpenAI is opt-in only. Paid calls (OpenRouter, vendors) never happen in tests, and at runtime only when keys are explicitly configured.
+- **Stdlib-only** (urllib, threading). Telethon/MLX are lazy optional imports only.
+- **Windows-safe (R18):** no `signal.SIGALRM`, `os.killpg`, `fcntl`, `pty`, `os.fork`; threading only. Selftest greps for this.
+- **Secrets:** keys come via `DEEP_RESEARCH_SECRETS_DIR` (default `~/.config/zbs-research/secrets`) or env; no key material in outputs, logs, or error messages.
+- **SKILL.md selftest contract:** the first occurrences of the markers `## STEP 0 — RESEARCH PLAN` → `--allocate-run` → `research-plan.md` → `--output-dir "$RUN_DIR"` → `synthesis.md` must appear in this order; the literal `${CLAUDE_PLUGIN_ROOT}` is forbidden in SKILL.md (but required in `hooks/hooks.json`).
+- Graceful degrade: a channel fails → `<name>.ERROR.md`, its neighbors keep going. Do not break this pattern.

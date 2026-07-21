@@ -17,7 +17,7 @@ claude plugin install deep-research@zbs-research
 ```
 
 Then it verifies the install via `claude plugin list` and tells you the next
-step: open Claude Code and say **«запусти deep research»** / **"run deep research"**.
+step: open Claude Code and say **"run deep research"**.
 
 It does nothing else — no telemetry, no config edits, no network calls of its
 own (the `claude` CLI does the actual marketplace fetch).

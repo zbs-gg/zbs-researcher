@@ -4,7 +4,7 @@
 
 ZBS Researcher: persona, CLI polish, npx installer, showcase.
 
-- **ZBS Researcher persona** («Заебись-Ресёрчер», brand-only — plugin id stays
+- **ZBS Researcher persona** (brand-only — plugin id stays
   `deep-research`): the wizard introduces itself by name and asks at most two
   persona questions (gender of address + tone preset), both skippable, only
   after the $0 Tier-0 proof. Choice persists in `onboarding.json` as a
