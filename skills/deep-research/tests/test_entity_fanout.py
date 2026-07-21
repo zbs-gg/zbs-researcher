@@ -18,6 +18,7 @@ import threading
 import time
 import types
 import unittest
+import urllib.error
 from pathlib import Path
 
 
@@ -320,6 +321,78 @@ class TieringTest(unittest.TestCase):
         free, paid = self._counts(cells)
         self.assertEqual(free, 8)   # 4 x 2 free channels — untouched by budget
         self.assertEqual(paid, 0)   # budget 0 => no paid cells
+
+
+def http_error(code):
+    return urllib.error.HTTPError("http://x", code, "err", None, None)
+
+
+class BackoffTest(unittest.TestCase):
+    """U4 — per-host pacing + deterministic backoff (reddit/bluesky)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.sleeps = []
+        self.ctx = entity_fanout.FanoutContext(
+            "topic", 5, sleep=lambda s: self.sleeps.append(s)
+        )
+
+    def test_paced_retries_then_succeeds(self):
+        seq = [http_error(429), None]
+
+        def thunk():
+            item = seq.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return 5
+
+        self.assertEqual(self.ctx.paced("reddit", thunk), 5)
+        self.assertEqual(self.sleeps, [1.0])  # base * 2**0
+
+    def test_paced_persistent_403_reraises(self):
+        def thunk():
+            raise http_error(403)
+
+        with self.assertRaises(urllib.error.HTTPError):
+            self.ctx.paced("bluesky", thunk)
+        self.assertEqual(self.sleeps, [1.0, 2.0, 4.0])  # retries=3, deterministic
+
+    def test_paced_non_throttle_status_not_retried(self):
+        calls = []
+
+        def thunk():
+            calls.append(1)
+            raise http_error(500)
+
+        with self.assertRaises(urllib.error.HTTPError):
+            self.ctx.paced("reddit", thunk)
+        self.assertEqual(len(calls), 1)  # 500 is not retried
+        self.assertEqual(self.sleeps, [])
+
+    def test_run_cell_throttled_degrades_after_backoff(self):
+        bad = RecordingChannel(raises=http_error(403))
+        runner = FakeRunner({"bluesky": bad})
+        entity_fanout.attach_runner(runner.as_globals())
+        cell = {"entity": entity("mem0"), "channel": "bluesky", "tier": "free"}
+        rec = entity_fanout._run_cell(cell, self.tmp, self.ctx)
+        self.assertEqual(rec["status"], "error")
+        self.assertEqual(len(bad.calls), 4)  # initial + 3 retries
+        self.assertEqual(self.sleeps, [1.0, 2.0, 4.0])
+        self.assertTrue((Path(self.tmp) / "entities" / "mem0" / "bluesky.ERROR.md").exists())
+
+    def test_run_cell_non_throttled_not_retried(self):
+        bad = RecordingChannel(raises=http_error(403))
+        runner = FakeRunner({"hackernews": bad})
+        entity_fanout.attach_runner(runner.as_globals())
+        cell = {"entity": entity("mem0"), "channel": "hackernews", "tier": "free"}
+        rec = entity_fanout._run_cell(cell, self.tmp, self.ctx)
+        self.assertEqual(rec["status"], "error")
+        self.assertEqual(len(bad.calls), 1)  # hackernews is not throttled — no retry
+        self.assertEqual(self.sleeps, [])
+
+    def test_host_locks_distinct_and_reused(self):
+        self.assertIs(self.ctx.host_lock("reddit"), self.ctx.host_lock("reddit"))
+        self.assertIsNot(self.ctx.host_lock("reddit"), self.ctx.host_lock("bluesky"))
 
 
 if __name__ == "__main__":

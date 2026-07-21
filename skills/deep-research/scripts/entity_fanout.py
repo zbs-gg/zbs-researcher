@@ -29,6 +29,7 @@ import json
 import re
 import threading
 import time
+import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -77,6 +78,13 @@ HARD_CONCURRENCY_CAP = 16
 # A free channel whose ERROR fraction exceeds this marks the whole run degraded
 # (KTD7) so a rate-limit-hollow matrix is never presented as "complete".
 FILL_RATE_DEGRADE_THRESHOLD = 0.5
+
+# Rate-limit-prone hosts get per-host pacing + backoff (U4). Reddit and Bluesky
+# already 403/429 under load; github (issues) and HN Algolia do not pace here.
+THROTTLED_HOSTS = {"reddit": "reddit", "bluesky": "bluesky"}
+BACKOFF_STATUS = (429, 403)
+BACKOFF_RETRIES = 3
+BACKOFF_BASE_SECONDS = 1.0
 
 # How many confidently topic-matching repos GitHub must yield before a topic is
 # treated as repo-shaped. Below this, the topic is product/people-shaped and the
@@ -437,6 +445,29 @@ class FanoutContext:
         with self._guard:
             return self._host_locks.setdefault(host, threading.Lock())
 
+    def paced(self, host, thunk, *, retries=BACKOFF_RETRIES, base=BACKOFF_BASE_SECONDS):
+        """Run `thunk` under per-host pacing + deterministic backoff (U4, R6).
+
+        The host lock serializes this host's cells so N entity queries don't
+        burst the same rate-limited endpoint. On HTTP 429/403 the call backs off
+        `base * 2**attempt` (via the injectable clock) and retries up to
+        `retries`, then re-raises so _run_cell degrades the cell to ERROR.md.
+        Only 429/403 are retried — other errors surface immediately. Backoff is
+        deterministic (no wall-clock randomness) so tests are stable. The reddit
+        cell reuses the runner's _arctic_shift_json, which already retries a
+        single 429; the retry cap here bounds the combined wait.
+        """
+        with self.host_lock(host):
+            attempt = 0
+            while True:
+                try:
+                    return thunk()
+                except urllib.error.HTTPError as e:
+                    if e.code not in BACKOFF_STATUS or attempt >= retries:
+                        raise
+                    self.sleep(base * (2 ** attempt))
+                    attempt += 1
+
 
 def discover_reddit_subs(topic):
     """Discover the topic's subreddits ONCE (KTD3) — reddit is topic-shaped, so
@@ -557,11 +588,15 @@ def _run_cell(cell, out_dir, ctx):
         "tier": cell.get("tier", "free"),
         "rank": entity.get("rank"),
     }
-    try:
+    def _body():
         if channel == "reddit":
-            n = _reddit_entity_cell(entity["name"], ctx, out_path)
-        else:
-            n = _invoke_channel(channel, _cell_query(entity, channel), out_path, ctx)
+            return _reddit_entity_cell(entity["name"], ctx, out_path)
+        return _invoke_channel(channel, _cell_query(entity, channel), out_path, ctx)
+
+    try:
+        host = THROTTLED_HOSTS.get(channel)
+        # Throttle-prone hosts pace per-host + back off (U4); others run direct.
+        n = ctx.paced(host, _body) if host else _body()
         size = out_path.stat().st_size if out_path.exists() else 0
         rec.update(
             status="ok",
