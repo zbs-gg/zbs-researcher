@@ -9,6 +9,7 @@ proven byte-compatible with the single-query path.
 All network is mocked — no live calls, no paid calls.
 """
 import importlib.util
+import re
 import sys
 import tempfile
 import types
@@ -217,6 +218,71 @@ class RunCellTokenTest(unittest.TestCase):
         r = entity_fanout._run_cell(cell, self.tmp, self.ctx)
         self.assertEqual(r["tokens_kind"], "est")
         self.assertEqual(r["tokens"], 100)  # 400 bytes // 4
+
+
+class BriefRenderTest(unittest.TestCase):
+    """U7 — entity-by-entity HTML brief, self-contained, honest footer."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        entity_fanout.attach_runner({
+            "markdown_to_html": deep_research.markdown_to_html,
+            "HTML_TEMPLATE": deep_research.HTML_TEMPLATE,
+        })
+
+    def _write_cell(self, slug, channel, body):
+        d = self.tmp / "entities" / slug / f"{channel}.md"
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.write_text(body, encoding="utf-8")
+
+    def _agg(self, degraded=False):
+        return {
+            "matrix": [
+                {"name": "mem0", "rank": 0, "sources": ["github", "hn"],
+                 "repo": "mem0ai/mem0", "stars": 61000, "desc": "memory layer for agents",
+                 "cells": {
+                     "hackernews": {"status": "ok", "path": "entities/mem0/hackernews.md"},
+                     "bluesky": {"status": "error", "error": "HTTP 403",
+                                 "path": "entities/mem0/bluesky.ERROR.md"}}},
+                {"name": "zep", "rank": 1, "sources": ["github"], "repo": "getzep/zep",
+                 "stars": 4700, "cells": {
+                     "hackernews": {"status": "ok", "path": "entities/zep/hackernews.md"}}},
+            ],
+            "manifest": {"entities": 2, "cells_ok": 2, "cells_error": 1, "paid_calls": 0,
+                         "tokens_real": 0, "tokens_est": 0, "wall_seconds": 12.3,
+                         "coverage": "repo-shaped topic", "degraded": degraded},
+        }
+
+    def test_matrix_render_entity_by_entity(self):
+        self._write_cell("mem0", "hackernews", "# HN — mem0\n- **Show HN: Mem0** — 201 pts\n")
+        self._write_cell("zep", "hackernews", "# HN — zep\n- **Show HN: Zep** — 104 pts\n")
+        brief = entity_fanout.render_entity_brief(self.tmp, "LLM agent memory", self._agg())
+        html = brief.read_text()
+        # entity rows present (H2 per entity)
+        self.assertIn("mem0", html)
+        self.assertIn("zep", html)
+        self.assertIn("Show HN: Mem0", html)
+        # error cell rendered as an honest marker, not blank-dropped
+        self.assertIn("HTTP 403", html)
+        # cost footer present
+        self.assertIn("2 entities", html)
+        self.assertIn("paid_calls=0", html)
+
+    def test_brief_is_self_contained(self):
+        self._write_cell("mem0", "hackernews", "# HN\n- item https://a.example\n")
+        brief = entity_fanout.render_entity_brief(self.tmp, "topic", self._agg())
+        html = brief.read_text()
+        self.assertIsNone(re.search(r'src=|href="http[^"]*\.css|@import', html))
+
+    def test_degraded_banner_shown(self):
+        self._write_cell("mem0", "hackernews", "# HN\n- item\n")
+        brief = entity_fanout.render_entity_brief(self.tmp, "topic", self._agg(degraded=True))
+        self.assertIn("DEGRADED", brief.read_text())
+
+    def test_no_degraded_banner_when_healthy(self):
+        self._write_cell("mem0", "hackernews", "# HN\n- item\n")
+        brief = entity_fanout.render_entity_brief(self.tmp, "topic", self._agg(degraded=False))
+        self.assertNotIn("DEGRADED", brief.read_text())
 
 
 if __name__ == "__main__":

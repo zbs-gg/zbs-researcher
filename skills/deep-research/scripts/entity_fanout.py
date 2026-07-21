@@ -25,6 +25,7 @@ Invariants (match the rest of the tool):
   - paid lenses only fire on the top-K entities (hybrid) and never exceed the
     paid budget without opt-in; no paid call is ever made without a key.
 """
+import html as _html
 import json
 import re
 import threading
@@ -831,6 +832,87 @@ def aggregate_matrix(enum_result, records, *, topic, started, finished,
         "degraded": degraded,
     }
     return {"matrix": matrix, "manifest": manifest}
+
+
+# ---------------------------------------------------------------------------
+# Entity x channel HTML brief (U7) — reuses the runner's self-contained renderer
+# ---------------------------------------------------------------------------
+_BRIEF_EXCERPT_LINES = 8
+
+
+def _cell_excerpt(out_dir, slug, channel, limit=_BRIEF_EXCERPT_LINES):
+    """A bounded preview of a cell's markdown (drop its own H1 + blanks)."""
+    path = Path(out_dir) / "entities" / slug / f"{channel}.md"
+    if not path.exists():
+        return []
+    lines = [
+        ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if ln.strip() and not ln.startswith("# ")
+    ]
+    return lines[:limit]
+
+
+def render_entity_brief(out_dir, topic, agg):
+    """Render brief.html entity-by-entity (KTD7), reusing the runner's
+    self-contained markdown_to_html + HTML_TEMPLATE (no external deps, R11).
+    Rows are entities; each shows its per-channel findings or an honest
+    error/empty marker; a cost/time footer and a degraded banner keep it
+    honest."""
+    out_dir = Path(out_dir)
+    matrix = agg["matrix"]
+    m = agg["manifest"]
+    summary = (
+        f"{m['entities']} entities · {m['cells_ok']} cells ok / {m['cells_error']} error · "
+        f"paid_calls={m['paid_calls']} · tokens real={m['tokens_real']} est={m['tokens_est']} · "
+        f"{m['wall_seconds']}s"
+    )
+    md = [f"# Deep research — entity landscape: {topic}\n"]
+    if m.get("coverage"):
+        md.append(f"_{m['coverage']}_\n")
+    md.append(f"_{summary}_\n")
+    if m.get("degraded"):
+        md.append(
+            "**⚠ DEGRADED — one or more free channels were mostly rate-limited; "
+            "the matrix below is incomplete.**\n"
+        )
+
+    for row in matrix:
+        star = f" ★{row['stars']:,}" if row.get("stars") else ""
+        repo = f" `{row['repo']}`" if row.get("repo") else ""
+        md.append(f"## {(row.get('rank') or 0) + 1}. {row['name']}{star}{repo}\n")
+        srcs = ", ".join(row.get("sources", []))
+        if srcs:
+            md.append(f"_sources: {srcs}_\n")
+        if row.get("desc"):
+            md.append(f"{row['desc']}\n")
+        for ch in list(FREE_ENTITY_CHANNELS) + list(PAID_LENSES):
+            cell = row["cells"].get(ch)
+            if not cell:
+                continue
+            md.append(f"### {ch}\n")
+            if cell["status"] != "ok":
+                md.append(f"_⚠ {cell.get('error') or 'error'} — see {cell['path']}_\n")
+                continue
+            excerpt = _cell_excerpt(out_dir, entity_slug(row["name"]), ch)
+            if excerpt:
+                md.extend(excerpt)
+                md.append("")
+            else:
+                md.append("_no signal_\n")
+
+    md.append("\n---\n")
+    md.append(f"_ZBS Researcher · entity-fanout · {summary}_")
+
+    markdown_to_html = _r("markdown_to_html")
+    template = _r("HTML_TEMPLATE")
+    doc = template.format(
+        title=_html.escape(f"Entity landscape: {topic}"),
+        date=time.strftime("%Y-%m-%d"),
+        content=markdown_to_html("\n".join(md)),
+    )
+    brief = out_dir / "brief.html"
+    brief.write_text(doc, encoding="utf-8")
+    return brief
 
 
 # ---------------------------------------------------------------------------
