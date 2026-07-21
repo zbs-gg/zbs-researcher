@@ -250,5 +250,77 @@ class RedditStrategyTest(unittest.TestCase):
         self.assertIn("skipped", out.read_text())
 
 
+class TieringTest(unittest.TestCase):
+    """U3 — hybrid tiering + paid-budget cap + --paid-all."""
+
+    def _ents(self, n):
+        return [entity(f"e{i}", rank=i) for i in range(n)]
+
+    def _counts(self, cells):
+        free = sum(1 for c in cells if c["tier"] == "free")
+        paid = sum(1 for c in cells if c["tier"] == "paid")
+        return free, paid
+
+    def test_hybrid_default(self):
+        cells, rep = entity_fanout.plan_cells(
+            self._ents(5), {"grok": "x", "gemini": "y"},
+            free_channels=("hackernews", "github-issues"), k=2,
+        )
+        free, paid = self._counts(cells)
+        self.assertEqual(free, 10)   # 5 entities x 2 free channels
+        self.assertEqual(paid, 4)    # top-2 entities x 2 available lenses
+        self.assertEqual(rep["paid_budget"], 4)
+        self.assertEqual(rep["paid_trimmed"], 0)
+
+    def test_paid_all_not_trimmed_back(self):
+        # regression guard: --paid-all must raise the budget, not be trimmed
+        # back to the default K x lenses.
+        cells, rep = entity_fanout.plan_cells(
+            self._ents(5), {"grok": "x", "gemini": "y"},
+            free_channels=("hackernews",), k=2, paid_all=True,
+        )
+        free, paid = self._counts(cells)
+        self.assertEqual(paid, 10)   # all 5 x 2 lenses, NOT trimmed to 4
+        self.assertEqual(rep["paid_trimmed"], 0)
+        self.assertEqual(rep["paid_budget"], 10)
+
+    def test_explicit_budget_trims_keeping_top_rank(self):
+        cells, rep = entity_fanout.plan_cells(
+            self._ents(5), {"grok": "x", "gemini": "y"},
+            free_channels=("hackernews",), k=2, paid_budget=2,
+        )
+        _, paid = self._counts(cells)
+        self.assertEqual(paid, 2)
+        self.assertEqual(rep["paid_trimmed"], 2)
+        # the 2 surviving paid cells belong to the top-rank entity (e0)
+        paid_entities = {c["entity"]["name"] for c in cells if c["tier"] == "paid"}
+        self.assertEqual(paid_entities, {"e0"})
+
+    def test_lens_absent_not_created(self):
+        # only a grok key, no gemini, no openrouter fallback -> gemini absent
+        cells, rep = entity_fanout.plan_cells(
+            self._ents(5), {"grok": "x"},
+            free_channels=("hackernews",), k=3,
+        )
+        self.assertEqual(rep["available_lenses"], ["grok"])
+        paid_channels = {c["channel"] for c in cells if c["tier"] == "paid"}
+        self.assertEqual(paid_channels, {"grok"})
+
+    def test_openrouter_fallback_enables_all_lenses(self):
+        _, rep = entity_fanout.plan_cells(
+            self._ents(3), {"openrouter": "sk-or-x"}, k=1,
+        )
+        self.assertEqual(rep["available_lenses"], list(entity_fanout.PAID_LENSES))
+
+    def test_free_never_gated_by_budget(self):
+        cells, rep = entity_fanout.plan_cells(
+            self._ents(4), {"grok": "x"},
+            free_channels=("hackernews", "bluesky"), k=2, paid_budget=0,
+        )
+        free, paid = self._counts(cells)
+        self.assertEqual(free, 8)   # 4 x 2 free channels — untouched by budget
+        self.assertEqual(paid, 0)   # budget 0 => no paid cells
+
+
 if __name__ == "__main__":
     unittest.main()

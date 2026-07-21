@@ -588,6 +588,78 @@ def build_free_cells(entities, channels=FREE_ENTITY_CHANNELS):
     ]
 
 
+# ---------------------------------------------------------------------------
+# Tiering + paid-budget cap (U3)
+# ---------------------------------------------------------------------------
+def available_lenses(keys, lenses=PAID_LENSES):
+    """Which paid lenses can actually run: a direct key, or the shared
+    openrouter fallback (gemini/grok/perplexity all route through it). A lens
+    with no usable key is absent and never counted toward the budget (R7).
+    openai is deliberately excluded — opt-in only, no fallback (R17)."""
+    keys = keys or {}
+    out = []
+    for lens in lenses:
+        if keys.get(lens) or keys.get("openrouter"):
+            out.append(lens)
+    return out
+
+
+def plan_cells(entities, keys, *, free_channels=FREE_ENTITY_CHANNELS,
+               lenses=PAID_LENSES, k=DEFAULT_K, paid_all=False, paid_budget=None):
+    """Build the full cell list under hybrid tiering (R3, R4, R7).
+
+    Free channels fan out on ALL entities; paid lenses on the top-K only
+    (`--paid-all` lifts them to all N *and* raises the budget so the opt-in is
+    never trimmed back). A hard `paid_budget` (default K x available_lenses, or
+    N x available_lenses under paid_all) trims excess paid cells keeping the
+    highest-rank entities. Free cells are never gated.
+
+    Entities are assumed rank-sorted (enumerate_entities returns them so).
+    Returns (cells, report).
+    """
+    entities = list(entities)
+    n = len(entities)
+    k = max(0, min(int(k), min(n, HARD_K_CAP)))
+    avail = available_lenses(keys, lenses)
+
+    free_cells = [
+        {"entity": e, "channel": ch, "tier": "free"}
+        for e in entities
+        for ch in free_channels
+    ]
+
+    paid_entities = entities if paid_all else entities[:k]
+    if paid_budget is None:
+        budget = (n if paid_all else k) * len(avail)
+    else:
+        budget = max(0, int(paid_budget))
+
+    paid_cells = [
+        {"entity": e, "channel": lens, "tier": "paid"}
+        for e in paid_entities
+        for lens in avail
+    ]
+    # rank order so a trim keeps the highest-rank entities' cells
+    paid_cells.sort(key=lambda c: (c["entity"].get("rank", 0), avail.index(c["channel"])))
+    trimmed = 0
+    if len(paid_cells) > budget:
+        trimmed = len(paid_cells) - budget
+        paid_cells = paid_cells[:budget]
+
+    report = {
+        "n": n,
+        "k": k,
+        "available_lenses": avail,
+        "free_channels": list(free_channels),
+        "free_cells": len(free_cells),
+        "paid_cells": len(paid_cells),
+        "paid_budget": budget,
+        "paid_all": bool(paid_all),
+        "paid_trimmed": trimmed,
+    }
+    return free_cells + paid_cells, report
+
+
 def run_matrix(cells, out_dir, ctx, *, concurrency=DEFAULT_CONCURRENCY):
     """Drain the (entity, channel) cell list with a bounded ThreadPoolExecutor
     (R5, Windows-safe: no fork/signal). Returns one record per cell in submit
