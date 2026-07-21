@@ -128,11 +128,29 @@ echo "   prepared plan-first handoff reused exactly one run"
 echo "3/10 plugin metadata agreement…"
 python3 - "$ROOT" <<'PY'
 import json
+import posixpath
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 plugin = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+# Regression guard (fix shipped in 0.3.0): the manifest must NOT re-declare the
+# standard hooks/hooks.json. Claude Code >=2.1.207 auto-loads hooks/hooks.json,
+# so an explicit manifest.hooks pointing at it makes the plugin fail to load
+# ("Duplicate hooks file detected"). manifest.hooks may only reference
+# ADDITIONAL hook files, never the auto-loaded standard one.
+hooks_field = plugin.get("hooks")
+hook_refs = [hooks_field] if isinstance(hooks_field, str) else list(hooks_field or [])
+for ref in hook_refs:
+    if not isinstance(ref, str):
+        continue
+    normalized = posixpath.normpath(ref)
+    if normalized == "hooks/hooks.json" or normalized.endswith("/hooks/hooks.json"):
+        raise SystemExit(
+            "plugin.json declares the standard hooks/hooks.json in manifest.hooks; "
+            "it is auto-loaded and re-declaring it fails plugin load on "
+            "claude >=2.1.207 (Duplicate hooks file detected)"
+        )
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
 expected = "0.3.0"
@@ -147,7 +165,7 @@ lowered_changelog = changelog.lower()
 for marker in ("ambiguous or malformed", "--only", "--skip", "blank explicit paths"):
     if marker not in lowered_changelog:
         raise SystemExit(f"changelog is missing CLI compatibility marker: {marker}")
-print(f"   plugin + marketplace = {expected}; changelog entry present")
+print(f"   plugin + marketplace = {expected}; changelog entry present; no duplicate hooks decl")
 PY
 
 echo "4/10 Windows portability — banned POSIX-only symbols…"
