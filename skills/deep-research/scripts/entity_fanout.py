@@ -18,8 +18,9 @@ same way (see connectors/__init__.py). Lookups happen per call (late binding),
 so tests that attach a fake runner dict are honored here.
 
 Invariants (match the rest of the tool):
-  - stdlib only; Windows-safe: concurrent.futures.ThreadPoolExecutor, no
-    signal.SIGALRM / os.killpg / fcntl / pty / os.fork;
+  - stdlib only; Windows-safe: concurrent.futures.ThreadPoolExecutor for
+    concurrency, no POSIX-only process/signal primitives (the selftest greps
+    scripts/ for them);
   - free channels run with zero paid keys; a failed (entity, channel) cell
     writes <channel>.ERROR.md and never aborts the matrix;
   - paid lenses only fire on the top-K entities (hybrid) and never exceed the
@@ -951,11 +952,15 @@ def write_research_plan(out_dir, topic, enum_result, plan_report, free_channels)
 
 def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
                       concurrency=DEFAULT_CONCURRENCY, paid_budget=None,
-                      paid_all=False, max_items=10,
+                      paid_all=False, max_items=10, dry_run=False,
                       free_channels=FREE_ENTITY_CHANNELS, lenses=PAID_LENSES):
     """Full entity-fanout run: enumerate -> plan (+ write research-plan.md) ->
     fan out -> aggregate. Writes research-plan.md (before firing), matrix.json,
     manifest.json, and brief.html into out_dir. Returns the aggregate dict.
+
+    With dry_run=True it stops after writing research-plan.md (enumeration +
+    computed call budget), firing no cells and no paid calls — a fast, free
+    preview of what a full run would do.
 
     The run directory is caller-owned (the CLI self-allocates it); this function
     does not consume an agent-prepared run — that path stays single-mode only.
@@ -966,7 +971,10 @@ def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
     t0 = time.time()
 
-    reddit_subs = discover_reddit_subs(topic) if "reddit" in free_channels else []
+    # dry-run enumerates without needing reddit subreddits (no fan-out).
+    reddit_subs = (
+        discover_reddit_subs(topic) if (not dry_run and "reddit" in free_channels) else []
+    )
     ctx = FanoutContext(topic, max_items, reddit_subs=reddit_subs)
 
     enum = enumerate_entities(topic, n=n, keys=keys, tmpdir=str(out_dir))
@@ -976,6 +984,23 @@ def run_entity_fanout(topic, out_dir, keys=None, *, n=DEFAULT_N, k=DEFAULT_K,
     )
     # plan-first: the plan (with the exact call budget) lands before any cell.
     write_research_plan(out_dir, topic, enum, plan_report, free_channels)
+
+    if dry_run:
+        manifest = {
+            "mode": "entity-fanout",
+            "dry_run": True,
+            "topic": topic,
+            "started": started,
+            "entities": len(enum["entities"]),
+            "coverage": enum.get("coverage"),
+            "enumeration_sources": enum.get("sources"),
+            "plan": plan_report,
+            "paid_calls": 0,
+            "tokens_real": 0,
+            "tokens_est": 0,
+        }
+        (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return {"matrix": [], "manifest": manifest}
 
     records = run_matrix(cells, out_dir, ctx, concurrency=concurrency)
     finished = time.strftime("%Y-%m-%dT%H:%M:%S")

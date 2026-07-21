@@ -369,6 +369,25 @@ class RunEntityFanoutTest(unittest.TestCase):
         self.assertIn("Call budget", plan)
         self.assertIn("free cells", plan)
 
+    def test_dry_run_writes_plan_no_cells(self):
+        ents = [entity("mem0", 0, repo="mem0ai/mem0"), entity("zep", 1)]
+        enum = {"topic": "t", "entities": ents,
+                "sources": {"github": "ok"}, "coverage": "repo-shaped topic"}
+        hn = PlanCheckChannel()
+        runner = FakeRunner({"hackernews": hn})
+        entity_fanout.attach_runner(runner.as_globals())
+        with mock.patch.object(entity_fanout, "enumerate_entities", return_value=enum):
+            agg = entity_fanout.run_entity_fanout(
+                "t", self.tmp, {}, dry_run=True, free_channels=("hackernews",)
+            )
+        self.assertTrue((Path(self.tmp) / "research-plan.md").exists())
+        self.assertTrue((Path(self.tmp) / "manifest.json").exists())
+        self.assertEqual(hn.plan_present_at_call, [])          # no cell ever fired
+        self.assertFalse((Path(self.tmp) / "matrix.json").exists())  # no fan-out artifacts
+        self.assertTrue(agg["manifest"]["dry_run"])
+        self.assertEqual(agg["manifest"]["paid_calls"], 0)
+        self.assertEqual(agg["matrix"], [])
+
     def test_empty_entities_clean_run(self):
         enum = {"topic": "t", "entities": [], "sources": {"github": "ok"}, "coverage": "none"}
         runner = FakeRunner({"hackernews": PlanCheckChannel()})

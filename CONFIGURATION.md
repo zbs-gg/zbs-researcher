@@ -74,6 +74,29 @@ export PERPLEXITY_RESEARCH_MODEL=sonar        # default
 export OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
+## Entity fan-out mode (`--mode entity-fanout`)
+
+Deep mode: enumerate the top-N entities for a topic, then query each entity
+across every channel. Flags (single mode ignores them):
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--mode entity-fanout` | `single` | switch on the deep entity-fan-out mode |
+| `--entities-n N` | 50 (cap 200) | how many entities to enumerate |
+| `--top-k K` | 10 | top-K entities that get the paid LLM lenses (free channels always run on all N) |
+| `--concurrency C` | 6 (cap 16) | max parallel (entity, channel) cells |
+| `--paid-budget B` | K × available lenses | hard ceiling on paid lens calls; excess is trimmed keeping top-rank entities |
+| `--paid-all` | off | run paid lenses on **all** N entities (raises the budget) |
+| `--dry-run` | off | enumerate + write `research-plan.md` with the call budget, then stop (no fan-out, no paid calls) |
+
+Free channels (hackernews, github-issues, reddit, bluesky) run with **zero
+keys** on all N entities; the paid lenses (grok/gemini/perplexity, or one
+OpenRouter key) enrich the top-K. Cost/time is reported honestly in
+`manifest.json` (real token usage where the vendor returns it, else a labeled
+estimate; a `degraded` flag when a channel was rate-limited). For
+product/people-shaped topics with no ranking GitHub repo, a lens key is required
+for good entity coverage — without one the run is flagged repo-shaped-only.
+
 ## Budget note
 
 The default run bills **no Anthropic and no OpenAI** API. Retrieval is

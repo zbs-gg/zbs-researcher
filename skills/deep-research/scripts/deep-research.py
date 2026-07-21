@@ -1413,8 +1413,21 @@ def run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap):
         paid_budget=args.paid_budget,
         paid_all=args.paid_all,
         max_items=max_items,
+        dry_run=args.dry_run,
     )
     m = agg["manifest"]
+    if m.get("dry_run"):
+        print(
+            f"[entity-fanout] dry-run: {m['entities']} entities enumerated; "
+            f"planned {m['plan']['free_cells']} free + {m['plan']['paid_cells']} paid cells "
+            f"(no fan-out). See research-plan.md.",
+            file=sys.stderr,
+        )
+        print(f"\nEntity-fanout dry-run done. Output: {out_dir}", file=sys.stderr)
+        for f in sorted(out_dir.iterdir()):
+            if f.is_file():
+                print(f"  {f.name}: {f.stat().st_size} bytes", file=sys.stderr)
+        return
     tag = " [DEGRADED — rate limits]" if m.get("degraded") else ""
     print(
         f"[entity-fanout] {m['entities']} entities, "
@@ -1469,6 +1482,9 @@ def main():
                     help="entity-fanout: hard ceiling on paid lens calls (default K x available lenses)")
     ap.add_argument("--paid-all", action="store_true",
                     help="entity-fanout: run paid lenses on ALL N entities (raises the budget)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="entity-fanout: enumerate + write research-plan.md with the call "
+                    "budget, then stop (no fan-out, no paid calls)")
     ap.add_argument(
         "--prepared-run",
         action="store_true",

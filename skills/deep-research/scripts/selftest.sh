@@ -244,6 +244,25 @@ grep -qE 'src=|href="http[^"]*\.css|@import' "$WIZ_OUT/brief.html" \
     && { echo "   FAIL: tier-0 brief.html not self-contained"; exit 1; }
 echo "   zero-key run produced a real report + self-contained brief"
 
+# entity-fanout dry-run (zero keys): enumerate top-N + write research-plan.md
+# with the computed call budget, no fan-out, no paid calls. Uses only the free
+# GitHub + HN enumeration sources, so it stays fast and rate-limit-safe.
+EF_OUT="$OUT/tier0-fanout"
+"${TIER0[@]}" python3 "$SCRIPT" "context engineering" --mode entity-fanout \
+    --entities-n 3 --dry-run --output-dir "$EF_OUT" >/dev/null 2>&1
+test -s "$EF_OUT/research-plan.md" || { echo "   FAIL: entity-fanout research-plan.md empty"; exit 1; }
+grep -q "Call budget" "$EF_OUT/research-plan.md" || { echo "   FAIL: research-plan.md missing call budget"; exit 1; }
+"${TIER0[@]}" python3 - "$EF_OUT/manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+assert m.get("mode") == "entity-fanout", m.get("mode")
+assert m.get("dry_run") is True, "dry-run manifest must flag dry_run"
+assert m.get("paid_calls", 0) == 0, "dry-run must make zero paid calls"
+assert m.get("entities", 0) >= 1, "enumeration produced no entities"
+assert m["plan"]["free_cells"] == m["entities"] * len(m["plan"]["free_channels"])
+print("   entity-fanout dry-run: enumerated entities + research-plan.md, zero paid calls")
+PY
+
 echo "10/10 claude plugin validate…"
 if command -v claude >/dev/null 2>&1; then
     (cd "$ROOT" && claude plugin validate .)

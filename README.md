@@ -188,7 +188,26 @@ python3 "$SCRIPT" "context engineering" \
 
 # render an existing synthesis beside it (or add --html-out for another name)
 python3 "$SCRIPT" --render-html ./research/existing-run/synthesis.md
+
+# ENTITY FAN-OUT — deep mode: enumerate the top-N entities for a topic, then
+# query EACH entity across every channel (an entity x channel dossier matrix,
+# not one blanket query per channel). Preview the plan + budget first:
+python3 "$SCRIPT" "LLM agent memory" --mode entity-fanout --entities-n 50 --dry-run
+# then the full run (free channels on all N; paid lenses on the top-K):
+python3 "$SCRIPT" "LLM agent memory" --mode entity-fanout --entities-n 50 --top-k 10
 ```
+
+**Entity fan-out** (`--mode entity-fanout`) is the deep-research mode. It
+enumerates the top-N entities (GitHub stars + HN mentions, free; an LLM lens is
+required for product/people-shaped topics with no ranking repo), fans each
+entity out across the channels — free channels on all N, paid LLM lenses on the
+top-K only (`--paid-all` for all N) — and aggregates a per-entity dossier matrix
+plus `brief.html`. It self-allocates its run and writes `research-plan.md` (with
+the exact call budget) before firing. Honest cost/time: real token counts + wall
+time, and a `degraded` flag when a channel was rate-limited — never `$0 / 40s`.
+Flags: `--entities-n` (default 50), `--top-k` (10), `--concurrency` (6),
+`--paid-budget`, `--paid-all`, `--dry-run`. Runs free with zero keys on
+repo-shaped topics.
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
