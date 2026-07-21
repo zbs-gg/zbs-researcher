@@ -564,10 +564,30 @@ def _reddit_entity_cell(entity_name, ctx, out_path):
     return len(ranked.items)
 
 
-def _invoke_channel(channel, query, out_path, ctx):
-    """Dispatch one non-reddit channel via the registry (R11). Paid lens usage
-    capture is layered in U5; here it is a plain registry call."""
+def _usage_total(usage):
+    """Normalize a vendor usage block to a total token count (KTD6).
+
+    Gemini direct returns `usageMetadata` (totalTokenCount / promptTokenCount /
+    candidatesTokenCount); OpenAI/OpenRouter/Perplexity/xAI return `usage`
+    (total_tokens / prompt_tokens / completion_tokens). Missing -> 0."""
+    if not isinstance(usage, dict):
+        return 0
+    for key in ("total_tokens", "totalTokenCount"):
+        val = usage.get(key)
+        if isinstance(val, (int, float)):
+            return int(val)
+    prompt = usage.get("prompt_tokens") or usage.get("promptTokenCount") or 0
+    completion = usage.get("completion_tokens") or usage.get("candidatesTokenCount") or 0
+    return int((prompt or 0) + (completion or 0))
+
+
+def _invoke_channel(channel, query, out_path, ctx, usage_sink=None):
+    """Dispatch one non-reddit channel via the registry (R11). For paid lenses,
+    an additive usage_sink captures real vendor token usage (KTD6); free
+    channels take no sink and are called with the unchanged 3-arg signature."""
     fn = _r("CONNECTORS")[channel].fn
+    if usage_sink is not None:
+        return fn(query, out_path, ctx.max_items, usage_sink=usage_sink)
     return fn(query, out_path, ctx.max_items)
 
 
@@ -588,10 +608,15 @@ def _run_cell(cell, out_dir, ctx):
         "tier": cell.get("tier", "free"),
         "rank": entity.get("rank"),
     }
+    # Paid lens cells get a per-cell usage sink so real-vs-est token accounting
+    # is exact (KTD6). Free cells take no sink.
+    usage_sink = [] if channel in PAID_LENSES else None
+
     def _body():
         if channel == "reddit":
             return _reddit_entity_cell(entity["name"], ctx, out_path)
-        return _invoke_channel(channel, _cell_query(entity, channel), out_path, ctx)
+        return _invoke_channel(channel, _cell_query(entity, channel), out_path, ctx,
+                               usage_sink=usage_sink)
 
     try:
         host = THROTTLED_HOSTS.get(channel)
@@ -604,6 +629,14 @@ def _run_cell(cell, out_dir, ctx):
             seconds=round(time.time() - t0, 2),
             output_size=size,
         )
+        if channel in PAID_LENSES:
+            if usage_sink:
+                rec["tokens"] = sum(_usage_total(u) for u in usage_sink)
+                rec["tokens_kind"] = "real"
+            else:
+                # vendor returned no usage block — honest size-based estimate
+                rec["tokens"] = size // 4
+                rec["tokens_kind"] = "est"
     except Exception as e:  # noqa: BLE001 — degrade, never kill sibling cells
         try:
             out_path.with_suffix(".ERROR.md").write_text(f"ERROR: {e}")
@@ -706,6 +739,98 @@ def run_matrix(cells, out_dir, ctx, *, concurrency=DEFAULT_CONCURRENCY):
     with ThreadPoolExecutor(max_workers=concurrency) as ex:
         futures = [ex.submit(_run_cell, c, out_dir, ctx) for c in cells]
         return [f.result() for f in futures]
+
+
+# ---------------------------------------------------------------------------
+# Aggregation: entity x channel dossier matrix + honest cost/time (U5)
+# ---------------------------------------------------------------------------
+def aggregate_matrix(enum_result, records, *, topic, started, finished,
+                     wall_seconds, plan_report):
+    """Assemble per-entity dossiers + a cost/time manifest (KTD7, R9).
+
+    Builds the entity x channel matrix (every cell, ok or error), per-channel
+    fill_rate, a `degraded` flag when a free channel's ERROR fraction exceeds
+    the threshold (so a rate-limit-hollow matrix is never called complete), and
+    honest token accounting split real (vendor `usage`) vs est (size-based).
+    Returns {matrix, manifest}."""
+    entities = enum_result["entities"]
+    cells_by_slug = {}
+    for r in records:
+        cells_by_slug.setdefault(r["slug"], {})[r["channel"]] = r
+
+    matrix = []
+    for e in entities:
+        slug = entity_slug(e["name"])
+        cells = cells_by_slug.get(slug, {})
+        matrix.append(
+            {
+                "name": e["name"],
+                "rank": e.get("rank"),
+                "type": e.get("type"),
+                "aliases": e.get("aliases", []),
+                "sources": e.get("sources", []),
+                "repo": e.get("repo"),
+                "stars": e.get("stars"),
+                "pushed": e.get("pushed"),
+                "url": e.get("url"),
+                "desc": e.get("desc"),
+                "cells": {
+                    ch: {
+                        "status": c["status"],
+                        "items_or_chars": c.get("items_or_chars"),
+                        "seconds": c.get("seconds"),
+                        "error": c.get("error"),
+                        "tokens": c.get("tokens"),
+                        "tokens_kind": c.get("tokens_kind"),
+                        "path": (
+                            f"entities/{slug}/{ch}.md"
+                            if c["status"] == "ok"
+                            else f"entities/{slug}/{ch}.ERROR.md"
+                        ),
+                    }
+                    for ch, c in cells.items()
+                },
+            }
+        )
+
+    channels = {}
+    for r in records:
+        s = channels.setdefault(
+            r["channel"], {"total": 0, "ok": 0, "error": 0, "tier": r["tier"]}
+        )
+        s["total"] += 1
+        s["ok" if r["status"] == "ok" else "error"] += 1
+
+    degraded = False
+    for s in channels.values():
+        s["fill_rate"] = round(s["ok"] / s["total"], 3) if s["total"] else 0.0
+        error_fraction = (s["error"] / s["total"]) if s["total"] else 0.0
+        s["error_fraction"] = round(error_fraction, 3)
+        if s["tier"] == "free" and s["total"] and error_fraction > FILL_RATE_DEGRADE_THRESHOLD:
+            degraded = True
+
+    tokens_real = sum(r.get("tokens", 0) for r in records if r.get("tokens_kind") == "real")
+    tokens_est = sum(r.get("tokens", 0) for r in records if r.get("tokens_kind") == "est")
+
+    manifest = {
+        "mode": "entity-fanout",
+        "topic": topic,
+        "started": started,
+        "finished": finished,
+        "wall_seconds": round(wall_seconds, 1),
+        "entities": len(entities),
+        "coverage": enum_result.get("coverage"),
+        "enumeration_sources": enum_result.get("sources"),
+        "plan": plan_report,
+        "channels": channels,
+        "cells_ok": sum(1 for r in records if r["status"] == "ok"),
+        "cells_error": sum(1 for r in records if r["status"] == "error"),
+        "paid_calls": sum(1 for r in records if r["tier"] == "paid"),
+        "tokens_real": tokens_real,
+        "tokens_est": tokens_est,
+        "degraded": degraded,
+    }
+    return {"matrix": matrix, "manifest": manifest}
 
 
 if __name__ == "__main__":  # pragma: no cover — manual smoke only

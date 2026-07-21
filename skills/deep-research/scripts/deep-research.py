@@ -350,10 +350,22 @@ def openrouter_request_body(provider, query):
     raise ValueError(f"no OpenRouter route for provider: {provider}")
 
 
-def _channel_via_openrouter(provider, query, out_path):
+def _record_usage(usage_sink, usage):
+    """Append a vendor usage block to an optional sink (entity-fanout token
+    accounting, KTD6). No-op for the single-query path (usage_sink is None),
+    which keeps the lens channels byte-compatible."""
+    if usage_sink is not None and usage:
+        usage_sink.append(usage)
+
+
+def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
     """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
     OpenAI chat/completions shape, append citations/annotations if present.
-    Errors propagate so run_connector writes <name>.ERROR.md."""
+    Errors propagate so run_connector writes <name>.ERROR.md.
+
+    `usage_sink` is an additive, behavior-preserving hook (KTD6): when supplied
+    (entity-fanout only), the response `usage` block is captured for real token
+    accounting. The written output and return value are unchanged either way."""
     body = openrouter_request_body(provider, query)
     data = post_json(
         OPENROUTER_URL,
@@ -378,14 +390,15 @@ def _channel_via_openrouter(provider, query, out_path):
             links.append(f"[{u.get('title') or u['url']}]({u['url']})")
     if links:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
 
-def channel_gemini(query, out_path, max_items):
+def channel_gemini(query, out_path, max_items, usage_sink=None):
     if not KEYS["gemini"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("gemini", query, out_path)
+        return _channel_via_openrouter("gemini", query, out_path, usage_sink=usage_sink)
     body = {
         "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
@@ -407,14 +420,15 @@ def channel_gemini(query, out_path, max_items):
         for c in meta.get("groundingChunks", [])[:30]:
             w = c.get("web", {})
             text += f"- [{w.get('title','?')}]({w.get('uri','?')})\n"
+    _record_usage(usage_sink, data.get("usageMetadata"))
     out_path.write_text(text)
     return len(text)
 
 
-def channel_grok(query, out_path, max_items):
+def channel_grok(query, out_path, max_items, usage_sink=None):
     if not KEYS["grok"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("grok", query, out_path)
+        return _channel_via_openrouter("grok", query, out_path, usage_sink=usage_sink)
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
@@ -430,6 +444,7 @@ def channel_grok(query, out_path, max_items):
         timeout=600,
     )
     text = _extract_responses_text(data) or json.dumps(data, indent=2)[:5000]
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
@@ -470,10 +485,10 @@ def channel_openai(query, out_path, max_items):
     return len(text)
 
 
-def channel_perplexity(query, out_path, max_items):
+def channel_perplexity(query, out_path, max_items, usage_sink=None):
     if not KEYS["perplexity"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("perplexity", query, out_path)
+        return _channel_via_openrouter("perplexity", query, out_path, usage_sink=usage_sink)
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
@@ -497,6 +512,7 @@ def channel_perplexity(query, out_path, max_items):
     cites = data.get("citations") or []
     if cites:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in cites[:40])
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
