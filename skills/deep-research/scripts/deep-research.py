@@ -79,6 +79,20 @@ Usage:
         --q gemini:"YouTube talks on X" --q openai:"Reddit/HN on X"
     # legacy aliases still work: --gemini-q --grok-q --openai-q
 
+    # investigate loop: fire ONE composed query on ONE named source; stdout is
+    # EXACTLY one JSON envelope {source, path, items, status, provenance} and
+    # repeated fires into the same --output-dir accumulate one manifest
+    python3 deep-research.py "owner/repo crash reports" --fire github-issues \\
+        --output-dir DIR
+
+    # save a human feedback note against a research topic (kept locally to
+    # inform the next run on that topic — nothing is trained on it)
+    python3 deep-research.py --feedback "too many stale results" --topic T
+
+    # coverage-receipts: print the "what a web-index researcher would miss"
+    # markdown section from an accumulated run's manifest.json
+    python3 deep-research.py --coverage DIR
+
     # render a shareable HTML brief from the synthesis markdown
     python3 deep-research.py --render-html DIR/synthesis.md --html-out DIR/brief.html
 """
@@ -1449,6 +1463,122 @@ def run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap):
             print(f"  {f.name}: {f.stat().st_size} bytes", file=sys.stderr)
 
 
+def _ran_channel_items(record):
+    """Item/char count a channel record contributes to its provenance record:
+    the real ``items_or_chars`` for an ok run, 0 otherwise — a failed or
+    missing channel is not evidence."""
+    if record and record.get("status") == "ok":
+        n = record.get("items_or_chars")
+        if isinstance(n, int):
+            return n
+    return 0
+
+
+def run_fire_cli(args, topic, launch_cwd, ap):
+    """--fire mode entrypoint (R1/R2/R5): fire ONE composed query on ONE named
+    source for the session-driven investigate loop.
+
+    The positional topic IS the composed query — the session composes short,
+    target-scoped queries and this runner never rewrites them, so an
+    `owner/repo` query reaches github-issues' repo-mode untouched. stdout
+    carries EXACTLY one JSON envelope {source, path, items, status,
+    provenance} — the loop's machine contract — so the banner/board stay off
+    and progress lines go to stderr. A failing channel degrades exactly like
+    the parallel run (an .ERROR.md twin, status "error" in the envelope) and
+    the process still exits 0: the envelope, not the exit code, tells the
+    loop what happened. Repeated fires into the same --output-dir accumulate
+    one manifest.json — the file the coverage-receipts renderer consumes.
+    """
+    if args.only or args.skip or args.prepared_run or args.mode != "single":
+        ap.error("--fire cannot be combined with --only/--skip/--prepared-run/--mode")
+    source = args.fire.strip()
+    if source not in CONNECTORS:
+        ap.error(
+            f"unknown source for --fire: {source!r} "
+            f"(valid: {', '.join(CONNECTORS)})"
+        )
+    conn = CONNECTORS[source]
+    if not conn.available():
+        # Honest refusal BEFORE any network attempt: the key is absent, so
+        # the channel is never called (R17 — no surprise paid calls).
+        ap.error(
+            f"source {source!r} is unavailable — missing keys: "
+            f"{conn.missing_keys()}; configure them or fire another source"
+        )
+
+    # Output dir: explicit --output-dir or project-local self-allocation, the
+    # same contract as entity-fanout (R13). The first fire's composed query
+    # names the run; later fires accumulate beside it.
+    try:
+        if args.output_dir is not None:
+            out_dir = resolve_output_directory(args.output_dir, launch_cwd)
+            out_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            project_root = resolve_project_root(launch_cwd, args.project_root)
+            out_dir = allocate_run_directory(project_root, topic)
+        topic_marker = out_dir / "_topic.txt"
+        if not topic_marker.exists():
+            topic_marker.write_text(topic + "\n", encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        ap.error(str(exc))
+
+    # Accumulating run manifest: load what previous fires wrote, append this
+    # fire's channel record + provenance record, write it back.
+    manifest_path = out_dir / "manifest.json"
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                manifest = loaded
+        except (OSError, ValueError):
+            print(
+                "[fire] existing manifest.json is unreadable — starting fresh",
+                file=sys.stderr,
+            )
+    manifest["mode"] = "investigate"
+    manifest.setdefault("topic", topic)
+    channels = manifest.setdefault("channels", {})
+    if not isinstance(channels, dict):
+        channels = manifest["channels"] = {}
+    provenance_rows = manifest.setdefault("provenance", [])
+    if not isinstance(provenance_rows, list):
+        provenance_rows = manifest["provenance"] = []
+
+    max_items = args.max_items if args.max_items is not None else 10
+    run_connector(conn, topic, out_dir, max_items, manifest, threading.Lock())
+
+    record = channels.get(source) or {}
+    status = record.get("status") or "error"
+    items = _ran_channel_items(record)
+    # No per-item ages are known here (channels return counts), so the record
+    # carries the static reachability classification (age None — the
+    # pre-index override can never fire from a --fire record today).
+    prov = _import_sibling("provenance").provenance_record(source, topic, items)
+    provenance_rows.append(prov)
+
+    out_path = out_dir / OUTPUT_NAMES[source]
+    if status != "ok":
+        out_path = out_path.with_suffix(".ERROR.md")
+
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+    except OSError as exc:
+        ap.error(str(exc))
+
+    print(
+        json.dumps(
+            {
+                "source": source,
+                "path": str(out_path),
+                "items": items,
+                "status": status,
+                "provenance": prov,
+            }
+        )
+    )
+
+
 def main():
     process_cwd = Path.cwd().resolve()
     ap = argparse.ArgumentParser(
@@ -1522,6 +1652,24 @@ def main():
         metavar="KIND",
         help="record a demand signal (want-paid | host-for-me) and exit",
     )
+    modes.add_argument(
+        "--fire",
+        metavar="SOURCE",
+        help="investigate loop: fire the composed query (the topic argument) "
+        "on ONE named source and print a single JSON result envelope to stdout",
+    )
+    modes.add_argument(
+        "--feedback",
+        metavar="NOTE",
+        help="save a human feedback note for --topic locally so it can inform "
+        "the next run on that topic (nothing is trained on it)",
+    )
+    modes.add_argument(
+        "--coverage",
+        metavar="RUN_DIR",
+        help="print the coverage-receipts markdown section (what a web-index "
+        "researcher would miss) from RUN_DIR/manifest.json and exit",
+    )
     ap.add_argument("--html-out", metavar="HTML", help="output path for --render-html")
     # legacy aliases
     ap.add_argument("--gemini-q")
@@ -1571,12 +1719,52 @@ def main():
         render_html(args.render_html, out)
         return
 
+    if args.coverage:
+        # U6 (R6): render the coverage-receipts section from an accumulated
+        # run manifest. Markers come only from real provenance records — a
+        # manifest without any prints nothing (an honest empty section is
+        # NO section, never a fabricated one).
+        try:
+            run_dir = resolve_output_directory(args.coverage, launch_cwd)
+        except (OSError, ValueError) as exc:
+            ap.error(str(exc))
+        try:
+            manifest = json.loads(
+                (run_dir / "manifest.json").read_text(encoding="utf-8")
+            )
+        except OSError:
+            ap.error(f"no readable manifest.json in {run_dir}")
+        except ValueError:
+            ap.error(f"manifest.json in {run_dir} is not valid JSON")
+        section = _import_sibling("provenance").render_coverage_section(manifest)
+        if section:
+            print(section)
+        return
+
     if args.topic and args.topic2:
         ap.error("provide topic either positionally or with --topic, not both")
     topic = args.topic or args.topic2
     if not topic or not topic.strip():
         ap.error("topic required (positional or --topic)")
     topic = topic.strip()
+
+    if args.feedback is not None:
+        # U4 (R9/R10): append the human note to the local investigate-feedback
+        # ledger. Honest wording throughout: the note is saved to inform the
+        # next run on this topic — nothing is trained on it.
+        investigate_feedback = _import_sibling("investigate_feedback")
+        try:
+            result = investigate_feedback.record_feedback(
+                topic, human_feedback=args.feedback
+            )
+        except (ValueError, OSError) as exc:
+            ap.error(str(exc))
+        print(investigate_feedback.feedback_message(result.notified))
+        return
+
+    if args.fire:
+        run_fire_cli(args, topic, launch_cwd, ap)
+        return
 
     if args.only and args.skip:
         ap.error("--only and --skip cannot be used together")
@@ -1716,6 +1904,21 @@ def main():
             else:
                 error = term_ui.sanitize(record.get("error", "?"))
                 print(f"[{name}] ERROR: {error}", file=sys.stderr)
+
+    # U1 (R6/R7): truthful per-channel provenance block, additive — every
+    # other manifest key is unchanged. The classic parallel run knows no
+    # per-item ages (channels return counts), so each record carries the
+    # static web-index reachability classification (age None means the
+    # pre-index override can never fire here) plus the real item/char count.
+    provenance_mod = _import_sibling("provenance")
+    manifest["provenance"] = [
+        provenance_mod.provenance_record(
+            c.name,
+            overrides.get(c.name, topic),
+            _ran_channel_items(manifest["channels"].get(c.name)),
+        )
+        for c in live
+    ]
 
     manifest["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
