@@ -97,8 +97,10 @@ Usage:
     python3 deep-research.py --render-html DIR/synthesis.md --html-out DIR/brief.html
 """
 import argparse
+import datetime as _dt
 import html as html_mod
 import importlib
+import inspect
 import json
 import math
 import os
@@ -388,6 +390,42 @@ def _record_usage(usage_sink, usage):
         usage_sink.append(usage)
 
 
+def _to_epoch(value):
+    """Best-effort UTC epoch-seconds from an item timestamp — epoch number or
+    ISO-8601 string. Returns None for anything unparseable: a missing or
+    garbage timestamp must never fake freshness (mirrors the eval's rule)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:  # bare epoch string ("1737600000")
+        return float(text)
+    except ValueError:
+        pass
+    try:  # ISO 8601, tolerate a trailing Z and naive (assume UTC)
+        dt = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.timestamp()
+
+
+def _note_ts(freshness_sink, value):
+    """Record one item's timestamp into an optional freshness sink (a list of
+    epoch-seconds). The runner turns the newest (max) epoch into the channel's
+    newest-item age. Additive and byte-compatible: sink None -> no-op, exactly
+    like usage_sink. Unparseable timestamps are dropped, never zeroed."""
+    if freshness_sink is None:
+        return
+    epoch = _to_epoch(value)
+    if epoch is not None:
+        freshness_sink.append(epoch)
+
+
 def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
     """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
     OpenAI chat/completions shape, append citations/annotations if present.
@@ -641,7 +679,7 @@ def rank_items(items, topic, *, text_key, engagement_key, comments_key=None,
 # ---------------------------------------------------------------------------
 # Direct channels (structural signal)
 # ---------------------------------------------------------------------------
-def channel_hackernews(query, out_path, max_items):
+def channel_hackernews(query, out_path, max_items, freshness_sink=None):
     # Pull a pool larger than max_items so the relevance/engagement ranker
     # has something to choose from (Algolia's own order is match-based).
     pool = min(50, max(30, max_items * 3))
@@ -674,6 +712,8 @@ def channel_hackernews(query, out_path, max_items):
         pts = h.get("points", 0)
         ncom = h.get("num_comments", 0)
         when = (h.get("created_at") or "")[:10]
+        # Algolia hands back created_at_i (epoch) — record it for freshness.
+        _note_ts(freshness_sink, h.get("created_at_i") or h.get("created_at"))
         hn = f"https://news.ycombinator.com/item?id={obj}"
         lines.append(f"- **{title}** — {pts} pts, {ncom} comments, {when}")
         lines.append(f"  - link: {u}")
@@ -809,7 +849,7 @@ def _gh_reactions(obj):
     return (obj.get("reactions") or {}).get("total_count") or 0
 
 
-def channel_github_issues(query, out_path, max_items):
+def channel_github_issues(query, out_path, max_items, freshness_sink=None):
     """Issues + comment bodies as product/competitor evidence (R11).
 
     Two modes:
@@ -862,6 +902,9 @@ def channel_github_issues(query, out_path, max_items):
     if not issues:
         lines.append("_No issues found._\n")
     for pos, it in enumerate(issues):
+        # Issue activity clock: updated_at is the freshest signal (a live
+        # thread), created_at the fallback — both ISO 8601.
+        _note_ts(freshness_sink, it.get("updated_at") or it.get("created_at"))
         lines.append(
             f"- **{it.get('title') or '?'}** — {it.get('state') or '?'}, "
             f"👍{_gh_reactions(it)} reactions, {it.get('comments') or 0} comments, "
@@ -944,7 +987,7 @@ def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
     return [name for name, _ in ordered[:limit]]
 
 
-def channel_reddit(query, out_path, max_items):
+def channel_reddit(query, out_path, max_items, freshness_sink=None):
     """Reaction-weighted Reddit via the free Arctic-Shift archive (the old
     reddit.com/search.json path is dead — Reddit throttles unauthenticated
     JSON). Real `score` + `num_comments` confirmed in the live API. No
@@ -1009,6 +1052,8 @@ def channel_reddit(query, out_path, max_items):
     if not ranked.items:
         lines.append("_No posts found._\n")
     for p in ranked.items:
+        # Arctic-Shift posts carry created_utc (epoch) — record for freshness.
+        _note_ts(freshness_sink, p.get("created_utc"))
         lines.append(
             f"- **{p.get('title','?')}** — ▲{p.get('score',0)}, "
             f"{p.get('num_comments',0)} comments, r/{p.get('subreddit','?')}"
@@ -1024,7 +1069,7 @@ def channel_reddit(query, out_path, max_items):
     return len(ranked.items)
 
 
-def channel_bluesky(query, out_path, max_items):
+def channel_bluesky(query, out_path, max_items, freshness_sink=None):
     """Best-effort public AppView search (no auth)."""
     url = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?" + urllib.parse.urlencode(
         {"q": query, "limit": max_items, "sort": "top"}
@@ -1041,6 +1086,8 @@ def channel_bluesky(query, out_path, max_items):
         reposts = p.get("repostCount", 0)
         uri = p.get("uri", "")
         rkey = uri.split("/")[-1] if uri else ""
+        # createdAt (author clock) / indexedAt (AppView clock) — ISO 8601.
+        _note_ts(freshness_sink, p.get("record", {}).get("createdAt") or p.get("indexedAt"))
         lines.append(f"- @{author} — ♥{likes}, ⟲{reposts}: {text[:240]}")
         if rkey:
             lines.append(f"  - https://bsky.app/profile/{author}/post/{rkey}")
@@ -1142,11 +1189,28 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
     """
     t0 = time.time()
     out_path = out_dir / OUTPUT_NAMES[conn.name]
+    # Freshness sink (additive, like usage_sink): structural channels that
+    # carry per-item timestamps append them here; the newest (max) epoch
+    # becomes the channel's newest-item age. Channels without the parameter
+    # (LLM lenses, timestamp-less sources) simply never receive it -> age
+    # stays unknown, which is honest.
+    freshness_sink = []
+    kwargs = {}
     try:
-        n = conn.fn(query, out_path, max_items)
+        if "freshness_sink" in inspect.signature(conn.fn).parameters:
+            kwargs["freshness_sink"] = freshness_sink
+    except (TypeError, ValueError):
+        pass
+    try:
+        n = conn.fn(query, out_path, max_items, **kwargs)
         dt = time.time() - t0
+        record = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
+        if freshness_sink:
+            record["newest_item_age_hours"] = round(
+                max(0.0, (time.time() - max(freshness_sink)) / 3600.0), 1
+            )
         with lock:
-            manifest["channels"][conn.name] = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
+            manifest["channels"][conn.name] = record
         if announce:
             print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
@@ -1567,10 +1631,14 @@ def run_fire_cli(args, topic, launch_cwd, ap):
     record = channels.get(source) or {}
     status = record.get("status") or "error"
     items = _ran_channel_items(record)
-    # No per-item ages are known here (channels return counts), so the record
-    # carries the static reachability classification (age None — the
-    # pre-index override can never fire from a --fire record today).
-    prov = _import_sibling("provenance").provenance_record(source, topic, items)
+    # Structural channels (hackernews/reddit/github-issues/bluesky) record the
+    # newest item's age in run_connector; pass it so provenance carries a real
+    # freshness_hours and the pre-index override can fire for a fresh live post.
+    # LLM lenses report None here -> honest "age unknown".
+    age = record.get("newest_item_age_hours")
+    prov = _import_sibling("provenance").provenance_record(
+        source, topic, items, newest_item_age_hours=age
+    )
     provenance_rows.append(prov)
 
     out_path = out_dir / OUTPUT_NAMES[source]
@@ -1922,16 +1990,19 @@ def main():
                 print(f"[{name}] ERROR: {error}", file=sys.stderr)
 
     # U1 (R6/R7): truthful per-channel provenance block, additive — every
-    # other manifest key is unchanged. The classic parallel run knows no
-    # per-item ages (channels return counts), so each record carries the
-    # static web-index reachability classification (age None means the
-    # pre-index override can never fire here) plus the real item/char count.
+    # other manifest key is unchanged. Structural channels record the newest
+    # item's age in run_connector; that age flows into provenance so a fresh
+    # live post can trip the pre-index override. Channels without per-item
+    # timestamps report None -> honest "age unknown".
     provenance_mod = _import_sibling("provenance")
     manifest["provenance"] = [
         provenance_mod.provenance_record(
             c.name,
             overrides.get(c.name, topic),
             _ran_channel_items(manifest["channels"].get(c.name)),
+            newest_item_age_hours=(
+                manifest["channels"].get(c.name) or {}
+            ).get("newest_item_age_hours"),
         )
         for c in live
     ]
