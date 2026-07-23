@@ -350,10 +350,22 @@ def openrouter_request_body(provider, query):
     raise ValueError(f"no OpenRouter route for provider: {provider}")
 
 
-def _channel_via_openrouter(provider, query, out_path):
+def _record_usage(usage_sink, usage):
+    """Append a vendor usage block to an optional sink (entity-fanout token
+    accounting, KTD6). No-op for the single-query path (usage_sink is None),
+    which keeps the lens channels byte-compatible."""
+    if usage_sink is not None and usage:
+        usage_sink.append(usage)
+
+
+def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
     """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
     OpenAI chat/completions shape, append citations/annotations if present.
-    Errors propagate so run_connector writes <name>.ERROR.md."""
+    Errors propagate so run_connector writes <name>.ERROR.md.
+
+    `usage_sink` is an additive, behavior-preserving hook (KTD6): when supplied
+    (entity-fanout only), the response `usage` block is captured for real token
+    accounting. The written output and return value are unchanged either way."""
     body = openrouter_request_body(provider, query)
     data = post_json(
         OPENROUTER_URL,
@@ -378,14 +390,15 @@ def _channel_via_openrouter(provider, query, out_path):
             links.append(f"[{u.get('title') or u['url']}]({u['url']})")
     if links:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
 
-def channel_gemini(query, out_path, max_items):
+def channel_gemini(query, out_path, max_items, usage_sink=None):
     if not KEYS["gemini"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("gemini", query, out_path)
+        return _channel_via_openrouter("gemini", query, out_path, usage_sink=usage_sink)
     body = {
         "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
@@ -407,14 +420,15 @@ def channel_gemini(query, out_path, max_items):
         for c in meta.get("groundingChunks", [])[:30]:
             w = c.get("web", {})
             text += f"- [{w.get('title','?')}]({w.get('uri','?')})\n"
+    _record_usage(usage_sink, data.get("usageMetadata"))
     out_path.write_text(text)
     return len(text)
 
 
-def channel_grok(query, out_path, max_items):
+def channel_grok(query, out_path, max_items, usage_sink=None):
     if not KEYS["grok"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("grok", query, out_path)
+        return _channel_via_openrouter("grok", query, out_path, usage_sink=usage_sink)
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
@@ -430,6 +444,7 @@ def channel_grok(query, out_path, max_items):
         timeout=600,
     )
     text = _extract_responses_text(data) or json.dumps(data, indent=2)[:5000]
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
@@ -470,10 +485,10 @@ def channel_openai(query, out_path, max_items):
     return len(text)
 
 
-def channel_perplexity(query, out_path, max_items):
+def channel_perplexity(query, out_path, max_items, usage_sink=None):
     if not KEYS["perplexity"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("perplexity", query, out_path)
+        return _channel_via_openrouter("perplexity", query, out_path, usage_sink=usage_sink)
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
@@ -497,6 +512,7 @@ def channel_perplexity(query, out_path, max_items):
     cites = data.get("citations") or []
     if cites:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in cites[:40])
+    _record_usage(usage_sink, data.get("usage"))
     out_path.write_text(text)
     return len(text)
 
@@ -1336,6 +1352,103 @@ def _import_sibling(name):
         return importlib.import_module(name)
 
 
+def run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap):
+    """Entity-fanout mode entrypoint (KTD1/R13): self-allocate a run directory,
+    write research-plan.md before firing, fan out per entity across channels,
+    aggregate the entity x channel dossier matrix. Reuses this module's registry
+    + helpers via entity_fanout.attach_runner (the hyphenated filename cannot be
+    imported back into, so injection mirrors connectors/__init__.py)."""
+    entity_fanout = _import_sibling("entity_fanout")
+    n = args.entities_n if args.entities_n is not None else entity_fanout.DEFAULT_N
+    concurrency = (
+        args.concurrency if args.concurrency is not None else entity_fanout.DEFAULT_CONCURRENCY
+    )
+    max_items = args.max_items if args.max_items is not None else 10
+
+    if n < 1:
+        ap.error("--entities-n must be >= 1")
+    if args.entities_n is not None and args.entities_n > entity_fanout.HARD_N_CAP:
+        print(
+            f"[entity-fanout] --entities-n {args.entities_n} clamped to cap "
+            f"{entity_fanout.HARD_N_CAP}",
+            file=sys.stderr,
+        )
+        n = entity_fanout.HARD_N_CAP
+    # Explicit --top-k above N is a user error; a defaulted K just clamps to N.
+    if args.top_k is not None:
+        k = args.top_k
+        if k < 0:
+            ap.error("--top-k must be >= 0")
+        if k > n:
+            ap.error(f"--top-k ({k}) cannot exceed --entities-n ({n})")
+    else:
+        k = min(entity_fanout.DEFAULT_K, n)
+    if concurrency < 1:
+        ap.error("--concurrency must be >= 1")
+    if args.paid_budget is not None and args.paid_budget < 0:
+        ap.error("--paid-budget must be >= 0")
+
+    # Self-allocate the run directory — entity-fanout owns its run and does NOT
+    # use the single-mode --prepared-run handshake (R13).
+    try:
+        if args.output_dir is not None:
+            out_dir = resolve_output_directory(args.output_dir, launch_cwd)
+            out_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            project_root = resolve_project_root(launch_cwd, args.project_root)
+            out_dir = allocate_run_directory(project_root, topic)
+        (out_dir / "_topic.txt").write_text(topic + "\n", encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        ap.error(str(exc))
+
+    if show_banner:
+        print(term_ui.banner(caps), file=sys.stderr)
+    print(
+        f"[entity-fanout] topic={topic!r} N={n} K={k} concurrency={concurrency}"
+        + (" paid-all" if args.paid_all else ""),
+        file=sys.stderr,
+    )
+
+    entity_fanout.attach_runner(globals())
+    agg = entity_fanout.run_entity_fanout(
+        topic,
+        out_dir,
+        KEYS,
+        n=n,
+        k=k,
+        concurrency=concurrency,
+        paid_budget=args.paid_budget,
+        paid_all=args.paid_all,
+        max_items=max_items,
+        dry_run=args.dry_run,
+    )
+    m = agg["manifest"]
+    if m.get("dry_run"):
+        print(
+            f"[entity-fanout] dry-run: {m['entities']} entities enumerated; "
+            f"planned {m['plan']['free_cells']} free + {m['plan']['paid_cells']} paid cells "
+            f"(no fan-out). See research-plan.md.",
+            file=sys.stderr,
+        )
+        print(f"\nEntity-fanout dry-run done. Output: {out_dir}", file=sys.stderr)
+        for f in sorted(out_dir.iterdir()):
+            if f.is_file():
+                print(f"  {f.name}: {f.stat().st_size} bytes", file=sys.stderr)
+        return
+    tag = " [DEGRADED — rate limits]" if m.get("degraded") else ""
+    print(
+        f"[entity-fanout] {m['entities']} entities, "
+        f"{m['cells_ok']} cells ok / {m['cells_error']} error, "
+        f"paid_calls={m['paid_calls']}, tokens real={m['tokens_real']} est={m['tokens_est']}, "
+        f"{m['wall_seconds']}s{tag}",
+        file=sys.stderr,
+    )
+    print(f"\nEntity-fanout done. Output: {out_dir}", file=sys.stderr)
+    for f in sorted(out_dir.iterdir()):
+        if f.is_file():
+            print(f"  {f.name}: {f.stat().st_size} bytes", file=sys.stderr)
+
+
 def main():
     process_cwd = Path.cwd().resolve()
     ap = argparse.ArgumentParser(
@@ -1358,6 +1471,27 @@ def main():
     ap.add_argument("--only", help="comma list: run ONLY these connectors")
     ap.add_argument("--skip", help="comma list: skip these connectors")
     ap.add_argument("--max-items", type=int, help="items per direct channel (default 10)")
+    # Entity fan-out deep mode (default 'single' = today's behavior, unchanged).
+    ap.add_argument(
+        "--mode",
+        choices=["single", "entity-fanout"],
+        default="single",
+        help="single (default: one blanket query per channel) or entity-fanout "
+        "(enumerate top-N entities, fan out per entity across channels)",
+    )
+    ap.add_argument("--entities-n", type=int, metavar="N",
+                    help="entity-fanout: entities to enumerate (default 50, hard cap 200)")
+    ap.add_argument("--top-k", type=int, metavar="K",
+                    help="entity-fanout: top-K entities that get paid lenses (default 10)")
+    ap.add_argument("--concurrency", type=int, metavar="C",
+                    help="entity-fanout: max parallel cells (default 6, cap 16)")
+    ap.add_argument("--paid-budget", type=int, metavar="B",
+                    help="entity-fanout: hard ceiling on paid lens calls (default K x available lenses)")
+    ap.add_argument("--paid-all", action="store_true",
+                    help="entity-fanout: run paid lenses on ALL N entities (raises the budget)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="entity-fanout: enumerate + write research-plan.md with the call "
+                    "budget, then stop (no fan-out, no paid calls)")
     ap.add_argument(
         "--prepared-run",
         action="store_true",
@@ -1446,6 +1580,10 @@ def main():
 
     if args.only and args.skip:
         ap.error("--only and --skip cannot be used together")
+
+    if args.mode == "entity-fanout":
+        run_entity_fanout_cli(args, topic, launch_cwd, caps, show_banner, ap)
+        return
 
     if args.prepared_run and args.output_dir is None:
         ap.error("--prepared-run requires --output-dir")

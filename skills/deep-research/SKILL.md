@@ -172,6 +172,53 @@ optionally renders a shareable `brief.html`.
 - Pure academic lit review — Scholar/arXiv/Semantic Scholar are better primaries.
 - Internal codes / private APIs — not in public sources.
 
+## Two modes — broad-scan (default) vs entity fan-out
+
+The runner has two modes, chosen with `--mode`:
+
+- **`single`** (default) — one blanket query per channel (`"LLM agent memory"`
+  → one Grok blob, one Gemini blob, one Reddit blob…). Fast, cheap, broad. This
+  is the STEP 0 workflow above and is unchanged.
+- **`entity-fanout`** — actual deep research. It (1) **enumerates the top-N
+  entities** for the topic (GitHub top-repos-by-stars + HN mentions, free; an
+  LLM lens enriches and is *required* for product/people-shaped topics that have
+  no ranking repo), then (2) **fans out per entity** — every entity gets its own
+  query in each channel, then (3) **aggregates an entity × channel dossier
+  matrix**, and you (4) **synthesize the landscape** from the dossiers.
+
+  **Hybrid tiering (the default):** the free channels (hackernews, github-issues,
+  reddit, bluesky) run on **all N** entities; the paid LLM lenses (grok, gemini,
+  perplexity) run on the **top-K** only. `--paid-all` lifts lenses to all N.
+
+  ```bash
+  # preview the entity list + exact call budget, no fan-out, no paid calls
+  python3 "$SCRIPT" "TOPIC" --mode entity-fanout --entities-n 50 --dry-run
+
+  # full run (free channels on all N; paid lenses on top-K, budget-capped)
+  python3 "$SCRIPT" "TOPIC" --mode entity-fanout --entities-n 50 --top-k 10
+  ```
+
+  Flags: `--entities-n N` (default 50, cap 200), `--top-k K` (default 10),
+  `--concurrency C` (default 6, cap 16), `--paid-budget B` (default K × available
+  lenses), `--paid-all`, `--dry-run`.
+
+  **Self-allocated plan-first (different from single mode).** entity-fanout owns
+  its run: it self-allocates the run directory and writes `research-plan.md`
+  (the enumerated entity list + the computed call budget) *before* firing any
+  cell — it does **not** use the agent-driven `--allocate-run` / `--prepared-run`
+  handshake that STEP 0 uses for single mode. Artifacts:
+  `research-plan.md`, `entities/<entity-slug>/<channel>.md` (per cell; a failed
+  cell degrades to `<channel>.ERROR.md`), `matrix.json`, `manifest.json`,
+  `brief.html`. Then read the matrix and write `synthesis.md`.
+
+  **Honest cost/time (not $0 / 40s).** Fan-out over 50 entities is minutes of
+  wall time; the top-K paid lenses cost real vendor tokens. The manifest records
+  real paid-call count, token usage (real vendor `usage` when available, else a
+  labeled size-based estimate), and wall time — and flags the run `degraded` when
+  a free channel was mostly rate-limited, so a hollow matrix is never sold as
+  complete. Zero paid keys still yields a real matrix from GitHub + HN
+  enumeration + free-channel fan-out (repo-shaped topics).
+
 ## Onboarding (first run) — the wizard IS the conversation
 
 There is no separate setup screen. The wizard is this dialogue, run once,
