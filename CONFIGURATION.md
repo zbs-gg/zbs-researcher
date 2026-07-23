@@ -97,6 +97,57 @@ estimate; a `degraded` flag when a channel was rate-limited). For
 product/people-shaped topics with no ranking GitHub repo, a lens key is required
 for good entity coverage — without one the run is flagged repo-shaped-only.
 
+## Investigate mode
+
+The flagship question-driven loop is session-driven — there is no
+`--mode investigate`. The session composes short target-scoped queries and
+drives three stateless runner primitives (full playbook: the skill's
+INVESTIGATE MODE section):
+
+| Call | What it does |
+|---|---|
+| `"<composed query>" --fire <source> --output-dir DIR` | fire ONE composed query on ONE named source; stdout is exactly one JSON envelope `{source, path, items, status, provenance}`; a failing channel degrades to an `.ERROR.md` twin with `status: "error"` while the exit code stays 0; repeated fires into the same directory accumulate one `manifest.json` |
+| `--coverage RUN_DIR` | print the coverage-receipts markdown section ("Coverage — what a web-index researcher would miss") from `RUN_DIR/manifest.json`; markers render only from real provenance records — a manifest without provenance prints nothing, never a fabricated section |
+| `--feedback "<note>" --topic "<topic>"` | append the human note to a local `investigate-feedback.jsonl` in the secrets dir (created 0600); the next run on the topic reads it back before composing |
+
+Bounds the playbook enforces: **4 drill rounds max** by default — stop
+earlier the moment a round surfaces no new leads — and the paid lenses
+(grok / gemini / perplexity) are budget-conscious: the free channels carry
+the breadth, paid fires are saved for the leads that matter. A `--fire` on
+a keyless paid source refuses up front, naming the missing keys — no
+surprise paid calls.
+
+### Cartographer relay (opt-in)
+
+```bash
+export DEEP_RESEARCH_CARTOGRAPHER_URL=https://your-cartographer.example/feedback
+```
+
+Unset (the default), feedback is **saved locally to inform the next run**
+and no network I/O happens — useful, not learning. Set it — it must be an
+`https://` URL, anything else is refused — and each feedback row is also
+POSTed to your own Cartographer install so a research profile can compound
+across runs. The relay is failure-tolerant and honest: the local append
+always happens first, a relay failure never loses the note, and the
+confirmation copy claims a relay only after an actual HTTP 2xx. This repo
+ships no endpoint, no token, no default.
+
+### Eval harness (`scripts/eval_harness.py`)
+
+```bash
+python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" --beast-dir RUN_DIR
+```
+
+Scores an existing run against a free web-index baseline on three axes —
+primary-source depth (distinct quoted threads), freshness (median item age
+in hours), native social coverage — and appends one JSON row to
+`eval-log.jsonl` beside the run. The baseline is a Brave Search `site:`
+pass: `BRAVE_API_KEY` (or `brave-key.txt` in the secrets dir) is
+**optional** — without it the baseline row honestly reads
+`unavailable - no web-index key configured`, the run side still scores,
+and no network call is made. A richer paid baseline (`PARALLEL_API_KEY`)
+is an opt-in hook only, never required.
+
 ## Budget note
 
 The default run bills **no Anthropic and no OpenAI** API. Retrieval is
@@ -144,6 +195,17 @@ Non-connector components:
   `DEEP_RESEARCH_NOTIFY_URL` themselves — this repo ships **no endpoint, no
   token, no bot credential**, and non-HTTPS targets are refused. The
   confirmation copy honestly states whether a notification was sent.
+- **`investigate_feedback.py`** (`--feedback`): appends the note to a
+  **local** `investigate-feedback.jsonl` in the secrets dir (created 0600).
+  It POSTs the feedback JSON over HTTPS **only** when the operator has set
+  `DEEP_RESEARCH_CARTOGRAPHER_URL` themselves (same shape as the signals
+  relay: no shipped endpoint, no token, non-HTTPS refused, local append
+  first, relay claimed only after a real 2xx).
+- **`eval_harness.py`**: its only network call is the web-index baseline —
+  the question text goes to `api.search.brave.com` **only** when
+  `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
+  baseline row reads "unavailable", the run side still scores, and no
+  network I/O happens.
 - **Media backend** (`media_backend.py`, used by tiktok-ig): in the default
   `client` profile, audio bytes go to `api.groq.com` (Groq Whisper — Groq's
   own OpenAI-*compatible* route, not OpenAI) and image bytes to

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test — calls NO paid APIs. Verifies deterministic unit behavior,
 # packaged workflow/docs, metadata agreement, Windows portability, secret
-# hygiene, free direct connectors, HTML, the Tier-0 zero-key wizard path,
+# hygiene, free direct connectors, HTML, the Tier-0 zero-key wizard path
+# (incl. the investigate --fire smoke + eval-harness fixture scoring),
 # and (when the claude CLI is present) plugin manifest validity.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -67,8 +68,16 @@ required_markers = {
         "--launch-cwd",
         "supplied during skill discovery on Codex",
         'SCRIPT="$SKILL_DIR/scripts/deep-research.py"',
+        "not the pitch — quality is",
+        "saved locally to inform the next run",
     ),
-    "readme": ("complete skill-authored bundle", "raw-evidence runner", "--project-root"),
+    "readme": (
+        "complete skill-authored bundle",
+        "raw-evidence runner",
+        "--project-root",
+        "not the pitch — quality is",
+        "auditable primary evidence",
+    ),
     "cli": ("raw-evidence runner", "not a research plan or synthesis"),
 }
 for name, markers in required_markers.items():
@@ -91,6 +100,27 @@ if any(position < 0 for position in positions) or positions != sorted(positions)
         "raw-evidence runner -> synthesis.md"
     )
 
+# Investigate playbook (U3/U8): the flagship section must exist and read in
+# loop order — the section, then the compose hard rule (short target-scoped
+# queries, never a blanket sentence), then fire -> coverage -> feedback.
+ordered_investigate_markers = (
+    "INVESTIGATE MODE",
+    "NEVER fire a blanket",
+    "--fire",
+    "--coverage",
+    "--feedback",
+)
+investigate_positions = [skill.find(marker) for marker in ordered_investigate_markers]
+if (
+    any(position < 0 for position in investigate_positions)
+    or investigate_positions != sorted(investigate_positions)
+):
+    problems.append(
+        "skill must order the investigate playbook as INVESTIGATE MODE -> "
+        "compose hard rule (NEVER fire a blanket) -> --fire -> --coverage -> "
+        "--feedback"
+    )
+
 if "${CLAUDE_PLUGIN_ROOT}" in skill:
     problems.append("skill commands must not depend on CLAUDE_PLUGIN_ROOT")
 
@@ -100,7 +130,10 @@ if not output_module.is_file():
 
 if problems:
     raise SystemExit("\n".join(problems))
-print("   packaged docs describe one complete skill bundle and a raw CLI boundary")
+print(
+    "   packaged docs describe one complete skill bundle, a raw CLI boundary, "
+    "and the investigate playbook"
+)
 PY
 
 PROJECT="$OUT/project"
@@ -261,6 +294,70 @@ assert m.get("paid_calls", 0) == 0, "dry-run must make zero paid calls"
 assert m.get("entities", 0) >= 1, "enumeration produced no entities"
 assert m["plan"]["free_cells"] == m["entities"] * len(m["plan"]["free_channels"])
 print("   entity-fanout dry-run: enumerated entities + research-plan.md, zero paid calls")
+PY
+
+# investigate --fire smoke (zero keys): one composed query on one free
+# source. stdout must be EXACTLY one JSON envelope carrying the provenance
+# record, the result file must land in the run dir, and the accumulated
+# manifest must be investigate-mode with a real provenance entry. Free HN
+# endpoint only — zero paid calls.
+FIRE_OUT="$OUT/fire-run"
+"${TIER0[@]}" python3 "$SCRIPT" "context engineering" --fire hackernews \
+    --max-items 3 --output-dir "$FIRE_OUT" 2>/dev/null \
+    | python3 -c '
+import json, sys
+lines = [line for line in sys.stdin.read().splitlines() if line.strip()]
+assert len(lines) == 1, f"expected one JSON line on stdout, got {len(lines)}"
+envelope = json.loads(lines[0])
+for key in ("source", "path", "items", "status", "provenance"):
+    assert key in envelope, f"fire envelope missing {key!r}"
+assert envelope["source"] == "hackernews", envelope["source"]
+print("   --fire: one JSON envelope with a provenance record")
+'
+test -s "$FIRE_OUT/hackernews.md" || { echo "   FAIL: --fire hackernews.md missing/empty"; exit 1; }
+"${TIER0[@]}" python3 - "$FIRE_OUT/manifest.json" <<'PY'
+import json, sys
+manifest = json.load(open(sys.argv[1]))
+assert manifest.get("mode") == "investigate", manifest.get("mode")
+provenance = manifest.get("provenance")
+assert isinstance(provenance, list) and provenance, "manifest must carry provenance records"
+assert provenance[0].get("source") == "hackernews", provenance[0]
+print("   --fire manifest: mode investigate + provenance entry")
+PY
+
+# eval-harness scoring smoke on PURE fixtures (no network, no keys): a
+# Beast-shaped result set (quoted native threads, fresh) must beat a
+# web-index-shaped one (bare blog link, stale) on all three axes.
+python3 - "$HERE" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import eval_harness
+
+beast_md = "\n".join((
+    '- https://x.com/dev_a/status/1 — "agents forget everything after compaction"',
+    '- https://old.reddit.com/r/LocalLLaMA/comments/abc1 — "mem0 silently drops half my facts"',
+    '- https://github.com/owner/repo/issues/42 — "memory store corrupts on concurrent writes"',
+))
+baseline_md = "- https://example.com/blog/agent-memory-roundup\n"
+
+beast = {
+    "depth": eval_harness.score_depth(eval_harness.extract_evidence(beast_md)),
+    "freshness_hours": eval_harness.score_freshness([3.0, 20.0, 26.0]),
+    "social_coverage": eval_harness.score_social_coverage(
+        ["grok", "reddit", "github-issues"]
+    ),
+}
+baseline = {
+    "depth": eval_harness.score_depth(eval_harness.extract_evidence(baseline_md)),
+    "freshness_hours": eval_harness.score_freshness([720.0]),
+    "social_coverage": eval_harness.score_social_coverage(
+        ["https://example.com/blog"]
+    ),
+}
+assert beast["depth"] > baseline["depth"], (beast, baseline)
+assert beast["freshness_hours"] < baseline["freshness_hours"], (beast, baseline)
+assert beast["social_coverage"] > baseline["social_coverage"], (beast, baseline)
+print("   eval harness (fixtures): Beast beats the web-index baseline on all three axes")
 PY
 
 echo "10/10 claude plugin validate…"

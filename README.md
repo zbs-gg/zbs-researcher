@@ -9,12 +9,17 @@
 
 # ZBS Researcher
 
-**ZBS Researcher — deep, multi-source research with reactions from real
-humans: minutes to your first report, $0, zero keys to start.**
-Deep multi-source research with live people's reactions — HN, Reddit,
-GitHub, Polymarket, Threads and a dozen more channels pulled in parallel, a
-research plan written before every run, and a shareable HTML brief at the
-end. Minutes to the first report, $0 by default, zero keys to start.
+**ZBS Researcher — deep, multi-source research with native, full-breadth
+social/community depth and auditable primary evidence.**
+It reads the platforms from inside — live X via Grok's `x_search`, Telegram
+communities through a real client session, the full Reddit archive via
+Arctic-Shift, Threads, TikTok/IG, Bluesky — plus HN, GitHub, Polymarket and
+a dozen more channels pulled in parallel, a research plan written before
+every run, and a shareable HTML brief at the end. Every load-bearing claim
+ships as a real quote + author handle + clickable live link, where a
+web-index researcher sees only the indexed scraps. "Free/cheaper" is
+not the pitch — quality is: minutes to the first report, $0 and zero keys
+to start, but that is a property, not the argument.
 
 ## One-command install
 
@@ -208,6 +213,33 @@ time, and a `degraded` flag when a channel was rate-limited — never `$0 / 40s`
 Flags: `--entities-n` (default 50), `--top-k` (10), `--concurrency` (6),
 `--paid-budget`, `--paid-all`, `--dry-run`. Runs free with zero keys on
 repo-shaped topics.
+
+**Investigate mode** is the flagship playbook, not a `--mode` value: the
+session (Claude) composes one short target-scoped query per source and runs
+the loop itself — compose → fire → read → drill → synthesize, bounded at
+4 rounds by default. The runner contributes three stateless primitives:
+
+```bash
+# fire ONE composed query on ONE source; stdout = exactly one JSON envelope
+# {source, path, items, status, provenance}
+python3 "$SCRIPT" "owner/repo memory leak" --fire github-issues \
+    --output-dir ./scratch/investigate-run
+
+# coverage-receipts: what a web-index researcher would structurally miss,
+# rendered ONLY from the manifest's real provenance records — never inferred
+python3 "$SCRIPT" --coverage ./scratch/investigate-run
+
+# persist a human feedback note; the next run on this topic reads it back
+python3 "$SCRIPT" --feedback "grok was gold, reddit stale" --topic "agent memory"
+```
+
+Repeated fires into the same `--output-dir` accumulate one `manifest.json`
+with a provenance record per fire — the coverage-receipts source. The
+feedback note is saved locally to inform the next run on the topic (relayed
+to a Cartographer install only when you connect one — it is never described
+as "learned"). The full playbook (compose table, drill bounds, paid-lens
+budget) lives in the skill's INVESTIGATE MODE section; the knobs and the
+eval harness are in [CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
