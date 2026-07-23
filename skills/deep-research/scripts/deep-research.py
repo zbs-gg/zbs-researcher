@@ -272,7 +272,8 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # ":online" model can never be built (guarded by tests too).
 OPENROUTER_MODELS = {
     "gemini": "google/gemini-2.5-pro",
-    "grok": "x-ai/grok-4",
+    # x-ai/grok-4 was deprecated (OpenRouter 404s it) — live-caught 2026-07-23.
+    "grok": "x-ai/grok-4.3",
     "perplexity": "perplexity/sonar",
 }
 
@@ -291,8 +292,12 @@ def _gemini_prompt(query):
 
 
 _GROK_SYSTEM = (
-    "You search X / Twitter for honest user voice on technical topics. "
-    "Quote actual posts when available. Note dates. Surface contradictions."
+    "You search X / Twitter (and the live web) for honest user voice on "
+    "technical topics. Prioritize real X posts and threads. Quote actual "
+    "posts when available, with author handle and date. Surface "
+    "contradictions. Treat the current and previous calendar year as the "
+    "present and recent past, never as the future — if search returns posts "
+    "from those years, they are real and current; do not refuse them."
 )
 
 
@@ -338,15 +343,26 @@ def openrouter_request_body(provider, query):
             "tools": [{"googleSearch": {}}],
         }
     if provider == "grok":
-        # KTD2: same caveat as gemini — the x_search passthrough needs smoke
-        # confirmation before Tier 2 is advertised for the grok lens.
+        # Live-caught 2026-07-23: xAI's `x_search` grounding tool is a
+        # Responses-API primitive — OpenRouter's chat/completions endpoint
+        # rejects it ("unknown tool type x_search requires a matching Responses
+        # skin"), and neither top-level `search_parameters` nor a bare call
+        # triggers xAI Live Search through OpenRouter (both make grok answer
+        # from training and refuse current dates). Provider-native X retrieval
+        # is therefore only reachable with a DIRECT xAI key (channel_grok).
+        # Through OpenRouter the honest, working path is the web plugin (Exa):
+        # probed live it returns real x.com/<handle>/status/<id> posts with
+        # author handles and dates — web-index-grounded, not the native
+        # firehose, which is exactly how provenance.py already scores grok
+        # ("partial" reachability). NOT the ":online" model suffix (guarded by
+        # tests) — the explicit plugin API is the documented, non-suffix form.
         return {
             "model": OPENROUTER_MODELS["grok"],
             "messages": [
                 {"role": "system", "content": _GROK_SYSTEM},
                 {"role": "user", "content": _grok_user(query)},
             ],
-            "tools": [{"type": "x_search"}],
+            "plugins": [{"id": "web", "max_results": 8}],
         }
     if provider == "perplexity":
         # Sonar is grounded by construction — the model id IS the retrieval.
@@ -1061,7 +1077,7 @@ CONNECTORS = {
     c.name: c
     for c in [
         Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"], fallback_key="openrouter"),
-        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"], fallback_key="openrouter"),
+        Connector("grok", "llm", channel_grok, "X / Twitter (Grok: native x_search w/ direct xAI key, web-grounded via OpenRouter)", ["grok"], fallback_key="openrouter"),
         # openai is OFF by default: it bills the OpenAI API per token. Web/social
         # is covered by gemini+grok+perplexity (not OpenAI/Anthropic) + direct
         # channels. Opt in explicitly with --only openai when you want a GPT lens.
