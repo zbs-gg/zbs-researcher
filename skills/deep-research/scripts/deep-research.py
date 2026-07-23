@@ -426,14 +426,44 @@ def _note_ts(freshness_sink, value):
         freshness_sink.append(epoch)
 
 
-def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
+# X/Twitter status IDs are snowflakes: the post's creation time is encoded in
+# the high bits (ms since the 2010-11-04 epoch). Decoding them is a RIGOROUS,
+# deterministic freshness signal — no prose-date guessing — which lets the grok
+# live-X lens (prose out, not structured items) still report a real newest-post
+# age. Verified against grok output: id 2080203643035525617 -> 2026-07-23, the
+# same date grok printed for that quote.
+_X_STATUS_RE = re.compile(r"(?:x|twitter)\.com/[^/\s)]+/status/(\d{6,25})", re.I)
+_X_SNOWFLAKE_EPOCH_MS = 1288834974657
+
+
+def _note_x_post_ages(freshness_sink, text):
+    """Decode any X/Twitter status IDs in `text` into item timestamps and push
+    them to the freshness sink. Absurd ids (before the snowflake epoch or in the
+    future) are dropped so a malformed link can never fake freshness."""
+    if freshness_sink is None or not text:
+        return
+    horizon = time.time() + 86400.0
+    for sid in _X_STATUS_RE.findall(text):
+        try:
+            ts = ((int(sid) >> 22) + _X_SNOWFLAKE_EPOCH_MS) / 1000.0
+        except ValueError:
+            continue
+        if 1288834974.0 <= ts <= horizon:
+            freshness_sink.append(ts)
+
+
+def _channel_via_openrouter(provider, query, out_path, usage_sink=None,
+                            freshness_sink=None):
     """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
     OpenAI chat/completions shape, append citations/annotations if present.
     Errors propagate so run_connector writes <name>.ERROR.md.
 
     `usage_sink` is an additive, behavior-preserving hook (KTD6): when supplied
     (entity-fanout only), the response `usage` block is captured for real token
-    accounting. The written output and return value are unchanged either way."""
+    accounting. `freshness_sink` (additive too) collects X-post ages decoded
+    from any x.com/status links the answer cites — the grok live-X lens returns
+    prose, so this is its only structured freshness signal. The written output
+    and return value are unchanged either way."""
     body = openrouter_request_body(provider, query)
     data = post_json(
         OPENROUTER_URL,
@@ -459,14 +489,18 @@ def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
     if links:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
 
-def channel_gemini(query, out_path, max_items, usage_sink=None):
+def channel_gemini(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["gemini"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("gemini", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "gemini", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
@@ -489,14 +523,18 @@ def channel_gemini(query, out_path, max_items, usage_sink=None):
             w = c.get("web", {})
             text += f"- [{w.get('title','?')}]({w.get('uri','?')})\n"
     _record_usage(usage_sink, data.get("usageMetadata"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
 
-def channel_grok(query, out_path, max_items, usage_sink=None):
+def channel_grok(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["grok"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("grok", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "grok", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
@@ -513,6 +551,7 @@ def channel_grok(query, out_path, max_items, usage_sink=None):
     )
     text = _extract_responses_text(data) or json.dumps(data, indent=2)[:5000]
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
@@ -553,10 +592,13 @@ def channel_openai(query, out_path, max_items):
     return len(text)
 
 
-def channel_perplexity(query, out_path, max_items, usage_sink=None):
+def channel_perplexity(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["perplexity"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("perplexity", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "perplexity", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
@@ -581,6 +623,7 @@ def channel_perplexity(query, out_path, max_items, usage_sink=None):
     if cites:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in cites[:40])
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 

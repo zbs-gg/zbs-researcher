@@ -87,9 +87,10 @@ def _beast_dir(tmp, *, with_manifest=True):
                         "bluesky": {"status": "error", "error": "HTTP 502"},
                     },
                     "provenance": {
-                        "grok": {"source": "grok", "freshness": 3},
-                        "telegram": {"source": "telegram", "freshness": 5},
-                        "reddit": {"source": "reddit", "freshness": 7},
+                        # Real manifests write "freshness_hours" (provenance_record).
+                        "grok": {"source": "grok", "freshness_hours": 3},
+                        "telegram": {"source": "telegram", "freshness_hours": 5},
+                        "reddit": {"source": "reddit", "freshness_hours": 7},
                     },
                 }
             ),
@@ -165,6 +166,42 @@ class TestScoreFreshness(unittest.TestCase):
 
     def test_unknowns_skipped_not_zeroed(self):
         self.assertEqual(eval_harness.score_freshness([None, 4, 8]), 6.0)
+
+
+class TestManifestFreshnessKey(unittest.TestCase):
+    """Regression: the Beast side read the wrong provenance key ("freshness" /
+    "newest_item_age_hours") while provenance_record writes "freshness_hours",
+    so Beast freshness was permanently "unknown". Read the real key first."""
+
+    def _ages(self, provenance):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "manifest.json").write_text(
+                json.dumps({"channels": {}, "provenance": provenance}),
+                encoding="utf-8",
+            )
+            _sources, ages = eval_harness._manifest_sources_and_ages(d)
+        return ages
+
+    def test_reads_freshness_hours_key(self):
+        ages = self._ages([
+            {"source": "grok", "freshness_hours": 22.4},
+            {"source": "hackernews", "freshness_hours": 3465.7},
+        ])
+        self.assertEqual(sorted(ages), [22.4, 3465.7])
+
+    def test_falls_back_to_legacy_keys(self):
+        ages = self._ages([
+            {"source": "a", "freshness": 5},
+            {"source": "b", "newest_item_age_hours": 9},
+        ])
+        self.assertEqual(sorted(ages), [5, 9])
+
+    def test_none_ages_skipped(self):
+        ages = self._ages([
+            {"source": "grok", "freshness_hours": None},
+            {"source": "hn", "freshness_hours": 10},
+        ])
+        self.assertEqual(ages, [10])
 
 
 class TestScoreSocialCoverage(unittest.TestCase):

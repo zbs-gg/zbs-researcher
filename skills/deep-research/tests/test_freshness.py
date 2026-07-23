@@ -72,6 +72,54 @@ class NoteTsTests(unittest.TestCase):
         self.assertEqual(sink, [])  # a missing timestamp must not fake fresh=0
 
 
+class XSnowflakeTests(unittest.TestCase):
+    # id 2080203643035525617 -> 2026-07-23 08:09 UTC (verified against grok out)
+    KNOWN_ID = "2080203643035525617"
+    KNOWN_EPOCH = ((int("2080203643035525617") >> 22) + 1288834974657) / 1000.0
+
+    def test_decodes_status_url(self):
+        sink = []
+        dr._note_x_post_ages(
+            sink, f"see https://x.com/rohit_jsfreaky/status/{self.KNOWN_ID} lol"
+        )
+        self.assertEqual(len(sink), 1)
+        self.assertAlmostEqual(sink[0], self.KNOWN_EPOCH, delta=1.0)
+
+    def test_twitter_com_host_too(self):
+        sink = []
+        dr._note_x_post_ages(sink, f"https://twitter.com/x/status/{self.KNOWN_ID}")
+        self.assertEqual(len(sink), 1)
+
+    def test_multiple_ids_all_recorded(self):
+        sink = []
+        text = (
+            f"https://x.com/a/status/{self.KNOWN_ID} and "
+            f"https://x.com/b/status/2079846795803562041"
+        )
+        dr._note_x_post_ages(sink, text)
+        self.assertEqual(len(sink), 2)
+
+    def test_none_sink_and_empty_text_are_noops(self):
+        self.assertIsNone(dr._note_x_post_ages(None, "https://x.com/a/status/123456"))
+        sink = []
+        dr._note_x_post_ages(sink, "")
+        dr._note_x_post_ages(sink, None)
+        self.assertEqual(sink, [])
+
+    def test_absurd_ids_dropped(self):
+        sink = []
+        # id=1 decodes to the 2010 epoch (before any real post) -> dropped;
+        # a 25-digit id decodes far in the future -> dropped.
+        dr._note_x_post_ages(sink, "https://x.com/a/status/1")
+        dr._note_x_post_ages(sink, "https://x.com/a/status/9999999999999999999999999")
+        self.assertEqual(sink, [])
+
+    def test_non_status_x_links_ignored(self):
+        sink = []
+        dr._note_x_post_ages(sink, "https://x.com/someprofile and https://x.com/i/lists/5")
+        self.assertEqual(sink, [])
+
+
 class RunConnectorFreshnessTests(unittest.TestCase):
     def _manifest(self):
         return {"channels": {}, "connectors_skipped": {}}
