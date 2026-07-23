@@ -14,6 +14,9 @@ secrets/
 # OS
 .DS_Store
 
+# Local Claude Code project settings (personal plugin/skill scoping — never public)
+.claude/settings.local.json
+
 # Runtime research output at repo ROOT only.
 # Committed example runs live under docs/ and are NOT ignored.
 /research/
