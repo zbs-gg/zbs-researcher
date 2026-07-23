@@ -88,7 +88,13 @@ def _relay(entry, sender):
     relay_url = os.environ.get(CARTOGRAPHER_ENV_VAR, "").strip()
     if not relay_url:
         return False, None
-    if urllib.parse.urlsplit(relay_url).scheme != "https":
+    try:
+        scheme = urllib.parse.urlsplit(relay_url).scheme
+    except ValueError:
+        # Malformed URL — degrade to a clean not-relayed result, never raise
+        # (record_feedback already wrote the local note; rule 3: never lose it).
+        return False, "relay skipped: " + CARTOGRAPHER_ENV_VAR + " is not a valid URL"
+    if scheme != "https":
         return False, "relay skipped: " + CARTOGRAPHER_ENV_VAR + " must be an https:// URL"
     payload = json.dumps(entry, ensure_ascii=False).encode("utf-8")
     sender = sender if sender is not None else _https_post

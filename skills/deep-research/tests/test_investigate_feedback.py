@@ -259,6 +259,26 @@ class RelayTests(unittest.TestCase):
         self.assertIn("https", result.error)
         self.assertEqual(len(rows), 1)
 
+    def test_malformed_relay_url_degrades_without_raising(self):
+        # Review regression: a bracket-malformed URL makes urllib.urlsplit raise
+        # ValueError. record_feedback must save the note and degrade the relay to
+        # a clean not-notified result — never propagate the exception.
+        sender = mock.Mock()
+        with tempfile.TemporaryDirectory() as tmp, feedback_environment(
+            DEEP_RESEARCH_CARTOGRAPHER_URL="https://["
+        ):
+            base = Path(tmp)
+            result = investigate_feedback.record_feedback(
+                "ai memory", base_dir=base, sender=sender
+            )
+            rows = investigate_feedback.read_recent("ai memory", base_dir=base)
+
+        sender.assert_not_called()
+        self.assertTrue(result.logged)        # rule 3: the note is never lost
+        self.assertFalse(result.notified)
+        self.assertIsNotNone(result.error)    # honest skip reason, not a crash
+        self.assertEqual(len(rows), 1)
+
 
 class FeedbackMessageTests(unittest.TestCase):
     def test_message_claims_relay_only_when_actually_relayed(self):

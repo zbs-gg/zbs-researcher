@@ -43,7 +43,15 @@ def _cartographer_configured():
     info only: the boolean says a relay CAN happen, never that the local
     baseline does anything smarter on its own."""
     url = os.environ.get(CARTOGRAPHER_ENV_VAR, "").strip()
-    return bool(url) and urllib.parse.urlsplit(url).scheme == "https"
+    if not url:
+        return False
+    try:
+        return urllib.parse.urlsplit(url).scheme == "https"
+    except ValueError:
+        # A URL urlsplit rejects (e.g. a malformed IPv6 bracket) is not a valid
+        # https relay — and a SessionStart hook must NEVER crash the session, so
+        # this stays total (the _absent_state fallback calls it too).
+        return False
 
 
 def _load_runner():
