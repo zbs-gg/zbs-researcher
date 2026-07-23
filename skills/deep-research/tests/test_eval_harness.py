@@ -1,0 +1,292 @@
+"""U7 — eval harness (Beast vs web-index baseline).
+
+The scoring core is pure over two result sets: depth counts DISTINCT quoted
+primary-thread URLs (dedup by normalized URL), freshness is the median item
+age in hours (None when unknown), social coverage counts distinct NATIVE
+platforms reached (plain web pages do not count). The baseline side degrades
+honestly to an "unavailable" row when no web-index key is configured.
+
+All network is mocked — no live calls, no paid calls.
+"""
+import contextlib
+import importlib.util
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+import unittest.mock
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+HARNESS = SCRIPTS / "eval_harness.py"
+
+_scripts_path = str(SCRIPTS)
+if _scripts_path not in sys.path:
+    sys.path.insert(0, _scripts_path)
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+eval_harness = _load("eval_harness_under_test", HARNESS)
+
+
+QUOTED_MD = """# Grok — live X for: mem0
+- **Thread on mem0 restarts** — 3h ago
+  - https://x.com/somebody/status/123
+  - @somebody: "mem0 forgets everything when the vector store restarts"
+- **Same thread, other link form** — 3h ago
+  - http://www.x.com/somebody/status/123/
+  - @somebody: "still broken after the 0.2 upgrade, filing an issue"
+- **A bare link with no voice around it**
+  - https://x.com/lurker/status/999
+"""
+
+
+def _beast_dir(tmp, *, with_manifest=True):
+    """Three native-platform result files + a manifest with fresh provenance."""
+    run = Path(tmp) / "beast-run"
+    run.mkdir()
+    (run / "grok.md").write_text(QUOTED_MD, encoding="utf-8")
+    (run / "telegram.md").write_text(
+        "# Telegram — channels for: mem0\n"
+        "- **@mem0_users** — 5h ago\n"
+        "  - https://t.me/mem0_users/42\n"
+        '  - @maria: "we rolled back to 0.1 in prod, the retriever loops"\n',
+        encoding="utf-8",
+    )
+    (run / "reddit.md").write_text(
+        "# Reddit — top posts for: mem0\n"
+        "- **mem0 in production?** — 122 pts\n"
+        "  - https://reddit.com/r/LocalLLaMA/abc\n"
+        '  - > "the memory dedup silently drops user facts, took us a week to find"\n',
+        encoding="utf-8",
+    )
+    # An errored neighbor must not contribute evidence.
+    (run / "bluesky.ERROR.md").write_text(
+        "error, but with a link https://bsky.app/broken and a \"quoted excerpt line here\"\n",
+        encoding="utf-8",
+    )
+    if with_manifest:
+        (run / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "topic": "mem0",
+                    "channels": {
+                        "grok": {"status": "ok"},
+                        "telegram": {"status": "ok"},
+                        "reddit": {"status": "ok"},
+                        "bluesky": {"status": "error", "error": "HTTP 502"},
+                    },
+                    "provenance": {
+                        "grok": {"source": "grok", "freshness": 3},
+                        "telegram": {"source": "telegram", "freshness": 5},
+                        "reddit": {"source": "reddit", "freshness": 7},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    return run
+
+
+def _stale_brave_payload():
+    """One stale plain-web result — what a web-index pass hands back."""
+    stale = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S")
+    return {
+        "web": {
+            "results": [
+                {
+                    "url": "https://example.com/blog/mem0-review",
+                    "title": "mem0 review",
+                    "description": "A blog post about memory layers.",
+                    "page_age": stale,
+                }
+            ]
+        }
+    }
+
+
+class TestExtractEvidence(unittest.TestCase):
+    def test_links_found_with_quote_flags(self):
+        items = eval_harness.extract_evidence(QUOTED_MD)
+        by_url = {it["url"]: it["has_quote"] for it in items}
+        self.assertTrue(by_url["https://x.com/somebody/status/123"])
+        self.assertFalse(by_url["https://x.com/lurker/status/999"])
+        self.assertEqual(len(items), 3)
+
+    def test_no_links_no_items(self):
+        self.assertEqual(eval_harness.extract_evidence("just prose, no links"), [])
+
+
+class TestScoreDepth(unittest.TestCase):
+    def test_dedup_by_normalized_url(self):
+        # http/https, www., and trailing-slash variants are ONE thread.
+        items = [
+            {"url": "https://x.com/somebody/status/123", "has_quote": True},
+            {"url": "http://www.x.com/somebody/status/123/", "has_quote": True},
+            {"url": "https://t.me/mem0_users/42", "has_quote": True},
+        ]
+        self.assertEqual(eval_harness.score_depth(items), 2)
+
+    def test_quote_less_link_not_counted(self):
+        items = [
+            {"url": "https://x.com/lurker/status/999", "has_quote": False},
+            {"url": "https://t.me/mem0_users/42", "has_quote": True},
+        ]
+        self.assertEqual(eval_harness.score_depth(items), 1)
+
+    def test_from_fixture_markdown(self):
+        # The quoted fixture: one thread quoted twice (two URL spellings) + one
+        # quote-less link -> depth 1.
+        items = eval_harness.extract_evidence(QUOTED_MD)
+        self.assertEqual(eval_harness.score_depth(items), 1)
+
+
+class TestScoreFreshness(unittest.TestCase):
+    def test_median_odd(self):
+        self.assertEqual(eval_harness.score_freshness([100, 2, 10]), 10)
+
+    def test_median_even(self):
+        self.assertEqual(eval_harness.score_freshness([2, 4, 8, 100]), 6.0)
+
+    def test_unknown_ages_are_none(self):
+        self.assertIsNone(eval_harness.score_freshness([]))
+        self.assertIsNone(eval_harness.score_freshness(None))
+        self.assertIsNone(eval_harness.score_freshness([None, None]))
+
+    def test_unknowns_skipped_not_zeroed(self):
+        self.assertEqual(eval_harness.score_freshness([None, 4, 8]), 6.0)
+
+
+class TestScoreSocialCoverage(unittest.TestCase):
+    def test_native_platforms_only(self):
+        sources = ["grok", "telegram", "reddit", "github", "hackernews", "example.com"]
+        self.assertEqual(eval_harness.score_social_coverage(sources), 3)
+
+    def test_domains_and_urls_map_to_platforms(self):
+        sources = [
+            "twitter.com",
+            "https://www.reddit.com/r/LocalLLaMA/abc",
+            "news.ycombinator.com",  # a web page, not a native social platform
+            "https://example.com/blog",
+        ]
+        self.assertEqual(eval_harness.score_social_coverage(sources), 2)
+
+    def test_x_and_twitter_are_one_platform(self):
+        self.assertEqual(
+            eval_harness.score_social_coverage(["x.com", "twitter.com", "grok"]), 1
+        )
+
+    def test_empty(self):
+        self.assertEqual(eval_harness.score_social_coverage([]), 0)
+
+
+class TestBeastVsBaseline(unittest.TestCase):
+    """The flagship comparison: fresh multi-platform Beast run vs one stale
+    plain-web baseline result -> Beast wins on all three axes."""
+
+    def test_beast_wins_all_three_axes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+
+            def fake_fetch(url, headers=None, timeout=20):
+                return _stale_brave_payload()
+
+            with unittest.mock.patch.object(
+                eval_harness, "_read_brave_key", return_value="test-key-not-real-0000"
+            ):
+                row = eval_harness.run_eval("mem0 problems", run, fetch=fake_fetch)
+
+        beast, baseline = row["beast"], row["baseline"]
+        self.assertIsInstance(baseline, dict)
+        # depth: 3 distinct quoted native threads vs 1 snippet-backed web page
+        self.assertGreater(beast["depth"], baseline["depth"])
+        # freshness: fresher = LOWER median age
+        self.assertLess(beast["freshness_hours"], baseline["freshness_hours"])
+        self.assertAlmostEqual(beast["freshness_hours"], 5)
+        # social coverage: 3 native platforms vs 0 (a blog is not native)
+        self.assertGreater(beast["social_coverage"], baseline["social_coverage"])
+        self.assertEqual(beast["social_coverage"], 3)
+        self.assertEqual(baseline["social_coverage"], 0)
+
+    def test_error_files_do_not_contribute(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            scores = eval_harness.score_beast_dir(run)
+        # bluesky.ERROR.md carries a quoted link; it must not raise depth to 4
+        # and the errored channel must not count as a reached platform.
+        self.assertEqual(scores["depth"], 3)
+        self.assertEqual(scores["social_coverage"], 3)
+
+
+class TestNoKeyBaseline(unittest.TestCase):
+    def test_honest_unavailable_row_no_crash_no_network(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("network call attempted without a key")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            empty_secrets = Path(tmp) / "empty-secrets"
+            empty_secrets.mkdir()
+            env = {"DEEP_RESEARCH_SECRETS_DIR": str(empty_secrets), "BRAVE_API_KEY": ""}
+            with unittest.mock.patch.dict(os.environ, env), \
+                    unittest.mock.patch.object(eval_harness, "_get_json", boom), \
+                    unittest.mock.patch("urllib.request.urlopen", boom):
+                row = eval_harness.run_eval("mem0 problems", run)
+
+        self.assertEqual(row["baseline"], "unavailable - no web-index key configured")
+        # Beast still scored.
+        self.assertEqual(row["beast"]["depth"], 3)
+        self.assertEqual(row["beast"]["social_coverage"], 3)
+
+
+class TestEvalLog(unittest.TestCase):
+    def test_row_appended_and_valid_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            out_dir = Path(tmp) / "eval-out"
+            empty_secrets = Path(tmp) / "empty-secrets"
+            empty_secrets.mkdir()
+            env = {"DEEP_RESEARCH_SECRETS_DIR": str(empty_secrets), "BRAVE_API_KEY": ""}
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, env), \
+                    contextlib.redirect_stdout(stdout):
+                rc = eval_harness.main(
+                    ["mem0 problems", "--beast-dir", str(run), "--out", str(out_dir)]
+                )
+            self.assertEqual(rc, 0)
+            ledger = out_dir / "eval-log.jsonl"
+            lines = ledger.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1)
+            row = json.loads(lines[0])
+            self.assertEqual(row["question"], "mem0 problems")
+            self.assertIn("ts", row)
+            self.assertEqual(row["beast"]["depth"], 3)
+            self.assertEqual(row["baseline"], "unavailable - no web-index key configured")
+            # The comparison table reached stdout.
+            self.assertIn("depth", stdout.getvalue())
+
+    def test_default_ledger_lands_in_beast_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            empty_secrets = Path(tmp) / "empty-secrets"
+            empty_secrets.mkdir()
+            env = {"DEEP_RESEARCH_SECRETS_DIR": str(empty_secrets), "BRAVE_API_KEY": ""}
+            with unittest.mock.patch.dict(os.environ, env), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                rc = eval_harness.main(["mem0 problems", "--beast-dir", str(run)])
+            self.assertEqual(rc, 0)
+            self.assertTrue((run / "eval-log.jsonl").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

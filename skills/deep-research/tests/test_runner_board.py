@@ -154,7 +154,11 @@ GOLDEN_FOOTER = [
     "  _topic.txt: 11 bytes",
     "  alpha.md: 13 bytes",
     "  boom.ERROR.md: 18 bytes",
-    "  manifest.json: 410 bytes",
+    # 410 bytes before the investigate-mode work; the U1 provenance block
+    # (one fixed-width record per ran channel — fetched_at is a constant
+    # 25-char ISO UTC string) deterministically grew the manifest. Every
+    # other line is untouched — that is still the byte-compat proof.
+    "  manifest.json: 1027 bytes",
 ]
 
 

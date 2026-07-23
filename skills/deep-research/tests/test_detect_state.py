@@ -45,6 +45,7 @@ STATE_ENV_VARS = (
     "GROQ_API_KEY",
     "THREADS_ACCESS_TOKEN",
     "DEEP_RESEARCH_PROFILE",
+    "DEEP_RESEARCH_CARTOGRAPHER_URL",
 )
 
 
@@ -76,12 +77,29 @@ class DetectStateTests(unittest.TestCase):
                     "threads": False,
                 },
                 "telegram_session": False,
+                "cartographer": False,
                 "profile": "client",
                 "wizard_done": False,
                 "tier": None,
                 "persona": None,
             },
         )
+
+    def test_malformed_cartographer_url_never_crashes_state_or_doctor(self):
+        # Review regression: a bracket-malformed DEEP_RESEARCH_CARTOGRAPHER_URL
+        # makes urllib.urlsplit raise ValueError. A SessionStart hook must NEVER
+        # crash — collect_state, the _absent_state fallback, and doctor_report
+        # must all stay total and report cartographer False.
+        with tempfile.TemporaryDirectory() as tmp, isolated_environment(
+            tmp, DEEP_RESEARCH_CARTOGRAPHER_URL="https://["
+        ):
+            state = detect_state.collect_state()          # must not raise
+            absent = detect_state._absent_state()          # the fallback path
+            report = detect_state.doctor_report()          # --diagnose path
+
+        self.assertFalse(state["cartographer"])
+        self.assertFalse(absent["cartographer"])
+        self.assertIn("cartographer", report.lower())
 
     def test_env_keys_mark_providers_configured_at_call_time(self):
         with tempfile.TemporaryDirectory() as tmp, isolated_environment(
