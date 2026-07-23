@@ -8,7 +8,7 @@ whether the onboarding wizard already ran:
     {"providers": {"gemini": false, "grok": false, "perplexity": false,
                    "openrouter": false, "scrapecreators": false,
                    "groq": false, "threads": false},
-     "telegram_session": false, "profile": "client",
+     "telegram_session": false, "cartographer": false, "profile": "client",
      "wizard_done": false, "tier": null, "persona": null}
 
 Key resolution is delegated to the runtime itself: deep-research.py is loaded
@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -33,6 +34,16 @@ RUNNER_PATH = SCRIPTS_DIR / "deep-research.py"
 # KEYS dict, so bool(KEYS[name]) is the authoritative configured/absent signal.
 PROVIDERS = ("gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq", "threads")
 ONBOARDING_MARKER = "onboarding.json"
+CARTOGRAPHER_ENV_VAR = "DEEP_RESEARCH_CARTOGRAPHER_URL"
+
+
+def _cartographer_configured():
+    """True only when a Cartographer relay URL is set AND https — the same
+    gate investigate_feedback applies before any relay attempt. Availability
+    info only: the boolean says a relay CAN happen, never that the local
+    baseline does anything smarter on its own."""
+    url = os.environ.get(CARTOGRAPHER_ENV_VAR, "").strip()
+    return bool(url) and urllib.parse.urlsplit(url).scheme == "https"
 
 
 def _load_runner():
@@ -95,6 +106,7 @@ def collect_state(runner=None):
     return {
         "providers": providers,
         "telegram_session": telegram_session,
+        "cartographer": _cartographer_configured(),
         "profile": profile,
         "wizard_done": wizard_done,
         "tier": tier,
@@ -135,6 +147,16 @@ def doctor_report():
             persona["gender"], _clean(persona["gender"])
         )
         lines.append(f"  persona     : {gender_word} voice, tone {_clean(persona['tone'])}")
+    # Honest soft-plug: availability of the OPTIONAL Cartographer relay only.
+    # Compounding happens in Cartographer; this baseline just saves feedback
+    # notes locally, so neither branch may claim anything smarter than that.
+    if state["cartographer"]:
+        lines.append("  cartographer: relay on — research-profile compounding across runs")
+    else:
+        lines.append(
+            "  cartographer: not connected — connect Cartographer (neighboring product)"
+            " to compound your research profile across runs"
+        )
     return "\n".join(lines)
 
 
@@ -146,6 +168,7 @@ def _absent_state():
     return {
         "providers": {name: False for name in PROVIDERS},
         "telegram_session": False,
+        "cartographer": _cartographer_configured(),
         "profile": os.environ.get("DEEP_RESEARCH_PROFILE", "").strip() or "client",
         "wizard_done": False,
         "tier": None,

@@ -45,6 +45,7 @@ STATE_ENV_VARS = (
     "GROQ_API_KEY",
     "THREADS_ACCESS_TOKEN",
     "DEEP_RESEARCH_PROFILE",
+    "DEEP_RESEARCH_CARTOGRAPHER_URL",
 )
 
 
@@ -76,6 +77,7 @@ class DetectStateTests(unittest.TestCase):
                     "threads": False,
                 },
                 "telegram_session": False,
+                "cartographer": False,
                 "profile": "client",
                 "wizard_done": False,
                 "tier": None,
