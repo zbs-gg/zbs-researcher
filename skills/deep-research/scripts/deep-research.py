@@ -97,8 +97,10 @@ Usage:
     python3 deep-research.py --render-html DIR/synthesis.md --html-out DIR/brief.html
 """
 import argparse
+import datetime as _dt
 import html as html_mod
 import importlib
+import inspect
 import json
 import math
 import os
@@ -272,7 +274,8 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # ":online" model can never be built (guarded by tests too).
 OPENROUTER_MODELS = {
     "gemini": "google/gemini-2.5-pro",
-    "grok": "x-ai/grok-4",
+    # x-ai/grok-4 was deprecated (OpenRouter 404s it) — live-caught 2026-07-23.
+    "grok": "x-ai/grok-4.3",
     "perplexity": "perplexity/sonar",
 }
 
@@ -291,8 +294,12 @@ def _gemini_prompt(query):
 
 
 _GROK_SYSTEM = (
-    "You search X / Twitter for honest user voice on technical topics. "
-    "Quote actual posts when available. Note dates. Surface contradictions."
+    "You search X / Twitter (and the live web) for honest user voice on "
+    "technical topics. Prioritize real X posts and threads. Quote actual "
+    "posts when available, with author handle and date. Surface "
+    "contradictions. Treat the current and previous calendar year as the "
+    "present and recent past, never as the future — if search returns posts "
+    "from those years, they are real and current; do not refuse them."
 )
 
 
@@ -338,15 +345,26 @@ def openrouter_request_body(provider, query):
             "tools": [{"googleSearch": {}}],
         }
     if provider == "grok":
-        # KTD2: same caveat as gemini — the x_search passthrough needs smoke
-        # confirmation before Tier 2 is advertised for the grok lens.
+        # Live-caught 2026-07-23: xAI's `x_search` grounding tool is a
+        # Responses-API primitive — OpenRouter's chat/completions endpoint
+        # rejects it ("unknown tool type x_search requires a matching Responses
+        # skin"), and neither top-level `search_parameters` nor a bare call
+        # triggers xAI Live Search through OpenRouter (both make grok answer
+        # from training and refuse current dates). Provider-native X retrieval
+        # is therefore only reachable with a DIRECT xAI key (channel_grok).
+        # Through OpenRouter the honest, working path is the web plugin (Exa):
+        # probed live it returns real x.com/<handle>/status/<id> posts with
+        # author handles and dates — web-index-grounded, not the native
+        # firehose, which is exactly how provenance.py already scores grok
+        # ("partial" reachability). NOT the ":online" model suffix (guarded by
+        # tests) — the explicit plugin API is the documented, non-suffix form.
         return {
             "model": OPENROUTER_MODELS["grok"],
             "messages": [
                 {"role": "system", "content": _GROK_SYSTEM},
                 {"role": "user", "content": _grok_user(query)},
             ],
-            "tools": [{"type": "x_search"}],
+            "plugins": [{"id": "web", "max_results": 8}],
         }
     if provider == "perplexity":
         # Sonar is grounded by construction — the model id IS the retrieval.
@@ -372,14 +390,93 @@ def _record_usage(usage_sink, usage):
         usage_sink.append(usage)
 
 
-def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
+def _to_epoch(value):
+    """Best-effort UTC epoch-seconds from an item timestamp — epoch number or
+    ISO-8601 string. Returns None for anything unparseable: a missing or
+    garbage timestamp must never fake freshness (mirrors the eval's rule)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:  # bare epoch string ("1737600000")
+        return float(text)
+    except ValueError:
+        pass
+    try:  # ISO 8601, tolerate a trailing Z and naive (assume UTC)
+        dt = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.timestamp()
+
+
+# A timestamp more than this far in the future can't be a real item — it's a
+# fabricated/hallucinated id or gross clock skew. Dropping it (rather than
+# clamping its age to 0.0) is the honesty invariant: a future date must never
+# masquerade as "posted 0h ago" and trip the pre-index override. 300s absorbs
+# ordinary server clock skew without letting a hallucinated post through.
+_FUTURE_SKEW_SECONDS = 300.0
+
+
+def _future_ok(epoch):
+    return epoch is not None and epoch <= time.time() + _FUTURE_SKEW_SECONDS
+
+
+def _note_ts(freshness_sink, value):
+    """Record one item's timestamp into an optional freshness sink (a list of
+    epoch-seconds). The runner turns the newest (max) epoch into the channel's
+    newest-item age. Additive and byte-compatible: sink None -> no-op, exactly
+    like usage_sink. Unparseable OR future-dated timestamps are dropped, never
+    zeroed — a missing/impossible time must not fake freshness=0."""
+    if freshness_sink is None:
+        return
+    epoch = _to_epoch(value)
+    if epoch is not None and _future_ok(epoch):
+        freshness_sink.append(epoch)
+
+
+# X/Twitter status IDs are snowflakes: the post's creation time is encoded in
+# the high bits (ms since the 2010-11-04 epoch). Decoding them is a RIGOROUS,
+# deterministic freshness signal — no prose-date guessing — which lets the grok
+# live-X lens (prose out, not structured items) still report a real newest-post
+# age. Verified against grok output: id 2080203643035525617 -> 2026-07-23, the
+# same date grok printed for that quote.
+_X_STATUS_RE = re.compile(r"(?:x|twitter)\.com/[^/\s)]+/status/(\d{6,25})", re.I)
+_X_SNOWFLAKE_EPOCH_MS = 1288834974657
+
+
+def _note_x_post_ages(freshness_sink, text):
+    """Decode any X/Twitter status IDs in `text` into item timestamps and push
+    them to the freshness sink. Absurd ids — before the 2010 snowflake epoch, or
+    beyond a small clock-skew tolerance into the future — are dropped so a
+    hallucinated or malformed link can never fake freshness (age 0h)."""
+    if freshness_sink is None or not text:
+        return
+    for sid in _X_STATUS_RE.findall(text):
+        try:
+            ts = ((int(sid) >> 22) + _X_SNOWFLAKE_EPOCH_MS) / 1000.0
+        except ValueError:
+            continue
+        if 1288834974.0 <= ts and _future_ok(ts):
+            freshness_sink.append(ts)
+
+
+def _channel_via_openrouter(provider, query, out_path, usage_sink=None,
+                            freshness_sink=None):
     """Tier-2 execution: POST the pre-built body to OpenRouter, parse the
     OpenAI chat/completions shape, append citations/annotations if present.
     Errors propagate so run_connector writes <name>.ERROR.md.
 
     `usage_sink` is an additive, behavior-preserving hook (KTD6): when supplied
     (entity-fanout only), the response `usage` block is captured for real token
-    accounting. The written output and return value are unchanged either way."""
+    accounting. `freshness_sink` (additive too) collects X-post ages decoded
+    from any x.com/status links the answer cites — the grok live-X lens returns
+    prose, so this is its only structured freshness signal. The written output
+    and return value are unchanged either way."""
     body = openrouter_request_body(provider, query)
     data = post_json(
         OPENROUTER_URL,
@@ -405,14 +502,18 @@ def _channel_via_openrouter(provider, query, out_path, usage_sink=None):
     if links:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in links)
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
 
-def channel_gemini(query, out_path, max_items, usage_sink=None):
+def channel_gemini(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["gemini"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("gemini", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "gemini", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "contents": [{"role": "user", "parts": [{"text": _gemini_prompt(query)}]}],
         "tools": [{"googleSearch": {}}],
@@ -435,14 +536,18 @@ def channel_gemini(query, out_path, max_items, usage_sink=None):
             w = c.get("web", {})
             text += f"- [{w.get('title','?')}]({w.get('uri','?')})\n"
     _record_usage(usage_sink, data.get("usageMetadata"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
 
-def channel_grok(query, out_path, max_items, usage_sink=None):
+def channel_grok(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["grok"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("grok", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "grok", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "model": "grok-4.20-reasoning",
         "input": [
@@ -459,6 +564,7 @@ def channel_grok(query, out_path, max_items, usage_sink=None):
     )
     text = _extract_responses_text(data) or json.dumps(data, indent=2)[:5000]
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
@@ -499,10 +605,13 @@ def channel_openai(query, out_path, max_items):
     return len(text)
 
 
-def channel_perplexity(query, out_path, max_items, usage_sink=None):
+def channel_perplexity(query, out_path, max_items, usage_sink=None, freshness_sink=None):
     if not KEYS["perplexity"]:
         # Tier 2: no direct key — route through OpenRouter (KTD2).
-        return _channel_via_openrouter("perplexity", query, out_path, usage_sink=usage_sink)
+        return _channel_via_openrouter(
+            "perplexity", query, out_path, usage_sink=usage_sink,
+            freshness_sink=freshness_sink,
+        )
     body = {
         "model": PERPLEXITY_MODEL,
         "messages": [
@@ -527,6 +636,7 @@ def channel_perplexity(query, out_path, max_items, usage_sink=None):
     if cites:
         text += "\n\n---\n## Citations\n" + "".join(f"- {c}\n" for c in cites[:40])
     _record_usage(usage_sink, data.get("usage"))
+    _note_x_post_ages(freshness_sink, text)
     out_path.write_text(text)
     return len(text)
 
@@ -625,7 +735,7 @@ def rank_items(items, topic, *, text_key, engagement_key, comments_key=None,
 # ---------------------------------------------------------------------------
 # Direct channels (structural signal)
 # ---------------------------------------------------------------------------
-def channel_hackernews(query, out_path, max_items):
+def channel_hackernews(query, out_path, max_items, freshness_sink=None):
     # Pull a pool larger than max_items so the relevance/engagement ranker
     # has something to choose from (Algolia's own order is match-based).
     pool = min(50, max(30, max_items * 3))
@@ -658,6 +768,8 @@ def channel_hackernews(query, out_path, max_items):
         pts = h.get("points", 0)
         ncom = h.get("num_comments", 0)
         when = (h.get("created_at") or "")[:10]
+        # Algolia hands back created_at_i (epoch) — record it for freshness.
+        _note_ts(freshness_sink, h.get("created_at_i") or h.get("created_at"))
         hn = f"https://news.ycombinator.com/item?id={obj}"
         lines.append(f"- **{title}** — {pts} pts, {ncom} comments, {when}")
         lines.append(f"  - link: {u}")
@@ -793,7 +905,7 @@ def _gh_reactions(obj):
     return (obj.get("reactions") or {}).get("total_count") or 0
 
 
-def channel_github_issues(query, out_path, max_items):
+def channel_github_issues(query, out_path, max_items, freshness_sink=None):
     """Issues + comment bodies as product/competitor evidence (R11).
 
     Two modes:
@@ -846,6 +958,9 @@ def channel_github_issues(query, out_path, max_items):
     if not issues:
         lines.append("_No issues found._\n")
     for pos, it in enumerate(issues):
+        # Issue activity clock: updated_at is the freshest signal (a live
+        # thread), created_at the fallback — both ISO 8601.
+        _note_ts(freshness_sink, it.get("updated_at") or it.get("created_at"))
         lines.append(
             f"- **{it.get('title') or '?'}** — {it.get('state') or '?'}, "
             f"👍{_gh_reactions(it)} reactions, {it.get('comments') or 0} comments, "
@@ -928,7 +1043,7 @@ def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
     return [name for name, _ in ordered[:limit]]
 
 
-def channel_reddit(query, out_path, max_items):
+def channel_reddit(query, out_path, max_items, freshness_sink=None):
     """Reaction-weighted Reddit via the free Arctic-Shift archive (the old
     reddit.com/search.json path is dead — Reddit throttles unauthenticated
     JSON). Real `score` + `num_comments` confirmed in the live API. No
@@ -993,6 +1108,8 @@ def channel_reddit(query, out_path, max_items):
     if not ranked.items:
         lines.append("_No posts found._\n")
     for p in ranked.items:
+        # Arctic-Shift posts carry created_utc (epoch) — record for freshness.
+        _note_ts(freshness_sink, p.get("created_utc"))
         lines.append(
             f"- **{p.get('title','?')}** — ▲{p.get('score',0)}, "
             f"{p.get('num_comments',0)} comments, r/{p.get('subreddit','?')}"
@@ -1008,7 +1125,7 @@ def channel_reddit(query, out_path, max_items):
     return len(ranked.items)
 
 
-def channel_bluesky(query, out_path, max_items):
+def channel_bluesky(query, out_path, max_items, freshness_sink=None):
     """Best-effort public AppView search (no auth)."""
     url = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?" + urllib.parse.urlencode(
         {"q": query, "limit": max_items, "sort": "top"}
@@ -1025,6 +1142,8 @@ def channel_bluesky(query, out_path, max_items):
         reposts = p.get("repostCount", 0)
         uri = p.get("uri", "")
         rkey = uri.split("/")[-1] if uri else ""
+        # createdAt (author clock) / indexedAt (AppView clock) — ISO 8601.
+        _note_ts(freshness_sink, p.get("record", {}).get("createdAt") or p.get("indexedAt"))
         lines.append(f"- @{author} — ♥{likes}, ⟲{reposts}: {text[:240]}")
         if rkey:
             lines.append(f"  - https://bsky.app/profile/{author}/post/{rkey}")
@@ -1061,7 +1180,7 @@ CONNECTORS = {
     c.name: c
     for c in [
         Connector("gemini", "llm", channel_gemini, "YouTube + web (Gemini grounding)", ["gemini"], fallback_key="openrouter"),
-        Connector("grok", "llm", channel_grok, "X / Twitter live (Grok x_search)", ["grok"], fallback_key="openrouter"),
+        Connector("grok", "llm", channel_grok, "X / Twitter (Grok: native x_search w/ direct xAI key, web-grounded via OpenRouter)", ["grok"], fallback_key="openrouter"),
         # openai is OFF by default: it bills the OpenAI API per token. Web/social
         # is covered by gemini+grok+perplexity (not OpenAI/Anthropic) + direct
         # channels. Opt in explicitly with --only openai when you want a GPT lens.
@@ -1126,11 +1245,28 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
     """
     t0 = time.time()
     out_path = out_dir / OUTPUT_NAMES[conn.name]
+    # Freshness sink (additive, like usage_sink): structural channels that
+    # carry per-item timestamps append them here; the newest (max) epoch
+    # becomes the channel's newest-item age. Channels without the parameter
+    # (LLM lenses, timestamp-less sources) simply never receive it -> age
+    # stays unknown, which is honest.
+    freshness_sink = []
+    kwargs = {}
     try:
-        n = conn.fn(query, out_path, max_items)
+        if "freshness_sink" in inspect.signature(conn.fn).parameters:
+            kwargs["freshness_sink"] = freshness_sink
+    except (TypeError, ValueError):
+        pass
+    try:
+        n = conn.fn(query, out_path, max_items, **kwargs)
         dt = time.time() - t0
+        record = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
+        if freshness_sink:
+            record["newest_item_age_hours"] = round(
+                max(0.0, (time.time() - max(freshness_sink)) / 3600.0), 1
+            )
         with lock:
-            manifest["channels"][conn.name] = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
+            manifest["channels"][conn.name] = record
         if announce:
             print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
@@ -1551,10 +1687,14 @@ def run_fire_cli(args, topic, launch_cwd, ap):
     record = channels.get(source) or {}
     status = record.get("status") or "error"
     items = _ran_channel_items(record)
-    # No per-item ages are known here (channels return counts), so the record
-    # carries the static reachability classification (age None — the
-    # pre-index override can never fire from a --fire record today).
-    prov = _import_sibling("provenance").provenance_record(source, topic, items)
+    # Structural channels (hackernews/reddit/github-issues/bluesky) record the
+    # newest item's age in run_connector; pass it so provenance carries a real
+    # freshness_hours and the pre-index override can fire for a fresh live post.
+    # LLM lenses report None here -> honest "age unknown".
+    age = record.get("newest_item_age_hours")
+    prov = _import_sibling("provenance").provenance_record(
+        source, topic, items, newest_item_age_hours=age
+    )
     provenance_rows.append(prov)
 
     out_path = out_dir / OUTPUT_NAMES[source]
@@ -1906,16 +2046,19 @@ def main():
                 print(f"[{name}] ERROR: {error}", file=sys.stderr)
 
     # U1 (R6/R7): truthful per-channel provenance block, additive — every
-    # other manifest key is unchanged. The classic parallel run knows no
-    # per-item ages (channels return counts), so each record carries the
-    # static web-index reachability classification (age None means the
-    # pre-index override can never fire here) plus the real item/char count.
+    # other manifest key is unchanged. Structural channels record the newest
+    # item's age in run_connector; that age flows into provenance so a fresh
+    # live post can trip the pre-index override. Channels without per-item
+    # timestamps report None -> honest "age unknown".
     provenance_mod = _import_sibling("provenance")
     manifest["provenance"] = [
         provenance_mod.provenance_record(
             c.name,
             overrides.get(c.name, topic),
             _ran_channel_items(manifest["channels"].get(c.name)),
+            newest_item_age_hours=(
+                manifest["channels"].get(c.name) or {}
+            ).get("newest_item_age_hours"),
         )
         for c in live
     ]

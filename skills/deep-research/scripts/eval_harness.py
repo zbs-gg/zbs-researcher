@@ -227,7 +227,11 @@ def _manifest_sources_and_ages(beast_dir):
     for record in records:
         if not isinstance(record, dict):
             continue
-        age = record.get("freshness", record.get("newest_item_age_hours"))
+        # provenance_record writes the age under "freshness_hours"; keep the
+        # older aliases as fallbacks so pre-existing manifests still score.
+        age = record.get("freshness_hours")
+        if age is None:
+            age = record.get("freshness", record.get("newest_item_age_hours"))
         if isinstance(age, (int, float)):
             ages.append(age)
     return sources, ages

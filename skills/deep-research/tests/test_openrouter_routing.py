@@ -140,8 +140,15 @@ class OpenRouterRoutingTests(unittest.TestCase):
         self.assertEqual(
             call["headers"]["Authorization"], f"Bearer {OPENROUTER_KEY}"
         )
-        self.assertEqual(call["body"]["model"], "x-ai/grok-4")
-        self.assertEqual(call["body"]["tools"], [{"type": "x_search"}])
+        self.assertEqual(call["body"]["model"], "x-ai/grok-4.3")
+        # x_search is a Responses-API tool OpenRouter's chat/completions
+        # rejects (live-caught 2026-07-23) — the working OpenRouter path is the
+        # web plugin (Exa), which returns real x.com posts. Native x_search
+        # stays on the direct-xAI-key path only.
+        self.assertNotIn("tools", call["body"])
+        self.assertEqual(
+            call["body"]["plugins"], [{"id": "web", "max_results": 8}]
+        )
         self.assertIn(TOPIC, call["body"]["messages"][-1]["content"])
         self.assertIn("openrouter lens answer", written)
 
