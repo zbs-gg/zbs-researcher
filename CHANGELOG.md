@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0 — 2026-07-23
+
+Two new deep-research modes alongside the default broad-scan `single` mode — the
+edge is QUALITY: native, full-breadth social/community depth, not price.
+
+- **`--mode entity-fanout`** — real deep research instead of one blanket query
+  per channel: enumerate the top-N entities for a topic (GitHub top-by-stars +
+  HN mentions, per-source degrade; an LLM lens enriches / is required for
+  non-repo topics), then fan out **per entity** across the channels into an
+  entity×channel dossier matrix. Hybrid tiering: free channels on all N
+  entities, paid LLM lenses on the top-K only (`--paid-all` lifts + raises the
+  budget). Bounded `ThreadPoolExecutor` concurrency, per-host reddit/bluesky
+  backoff, per-cell `ERROR.md` degrade, and an honest cost/time manifest with a
+  `degraded` flag — never "$0 / 40s". `--dry-run` previews the entity list +
+  call budget for free.
+- **`--mode investigate`** — the flagship: a session-driven, question-driven
+  agentic loop. Compose short, target-scoped queries per source (never a
+  blanket sentence), `--fire <source>` one at a time, read + drill adaptively,
+  then synthesize a problems-first landscape report with a real quote + author
+  handle + clickable live link behind every load-bearing claim. Reads the
+  platforms from inside (live X via Grok, Telegram client-session, the full
+  Reddit archive) where a web-index researcher sees only the indexed scraps.
+- **Coverage-receipts** (`--coverage RUN_DIR`) mark, from real provenance,
+  what a web-index researcher would miss (Telegram with no web footprint,
+  fresh pre-index X, deep Reddit archive) — truthful, never inferred.
+- **Compound feedback loop**: `--feedback` saves your notes + composed queries
+  to a local ledger the next run reads (honest — a save, not learning), with an
+  opt-in Cartographer relay (`DEEP_RESEARCH_CARTOGRAPHER_URL`, https-only,
+  failure-tolerant) for cross-run profile compounding.
+- **Eval harness** (`eval_harness.py`) — head-to-head on your own data: Beast
+  vs a free web-index `site:` baseline, scored on primary-source depth,
+  freshness, and social-coverage.
+- Positioning is quality: "free / cheaper" is a property, not the pitch.
+
 ## 0.3.0 — 2026-07-21
 
 ZBS Researcher: persona, CLI polish, npx installer, showcase.
