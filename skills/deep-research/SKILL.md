@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Parallel multi-channel deep research with native, full-breadth social/community depth — LLM lenses (Gemini/Grok/Perplexity; OpenAI opt-in) + direct connectors (HN, Hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis, plus an investigate mode - question-driven agentic research that reads the platforms from inside (live X, Telegram, full Reddit archive) and cites auditable primary evidence. ALWAYS produce a research plan first, then run. By default it does NOT bill Anthropic/OpenAI APIs. Use for any topic that needs multi-source diligence — tech investigation, comparative analysis, scientific landscape, real user voices vs marketing, hiring-market hotness, contradictions between sources. NOT for one-off fact-checks.
+description: Parallel multi-channel deep research with native, full-breadth social/community depth — LLM lenses (Gemini/Grok/Perplexity; OpenAI opt-in) + direct connectors (HN, Hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis. DEFAULT TO THE DEEPEST MODE — run the question-driven agentic investigate playbook (compose short target-scoped queries per source, fire, read, drill down, synthesize a problems-first report) that reads the platforms from inside (live X, Telegram, full Reddit archive) and cites auditable primary evidence; only drop to a quick single-query scan when the user explicitly asks for speed. ALWAYS produce a research plan first, then run. By default it does NOT bill Anthropic/OpenAI APIs. Use for any topic that needs multi-source diligence — tech investigation, comparative analysis, scientific landscape, real user voices vs marketing, hiring-market hotness, contradictions between sources. NOT for one-off fact-checks.
 ---
 
 # Deep Research — plan first, then multi-channel pull + synthesis
@@ -178,15 +178,29 @@ optionally renders a shareable `brief.html`.
 - Pure academic lit review — Scholar/arXiv/Semantic Scholar are better primaries.
 - Internal codes / private APIs — not in public sources.
 
-## Three modes — broad-scan, entity fan-out, investigate
+## Three modes — investigate (deep) is the DEFAULT
 
-Three research modes. `single` and `entity-fanout` live in the runner and
-are chosen with `--mode`; `investigate` is a session-driven playbook (next
-section) that drives the runner one composed query at a time:
+**FORCE THE DEEPEST MODE BY DEFAULT.** When a research task reaches this
+skill, run the **`investigate`** playbook (the next section): maximum depth,
+native full-breadth social/community reach, adaptive drill-down, paid lenses
+engaged whenever their keys are present. That is the whole point of the tool
+— beating a web-index researcher on quality. Do **not** silently drop to a
+shallower mode; use `single` or `entity-fanout` only when the user
+*explicitly* asks for a quick scan or a whole-field map. When in doubt, go
+deep.
 
-- **`single`** (default) — one blanket query per channel (`"LLM agent memory"`
-  → one Grok blob, one Gemini blob, one Reddit blob…). Fast, cheap, broad. This
-  is the STEP 0 workflow above and is unchanged.
+`single` and `entity-fanout` live in the runner (`--mode`); `investigate` is
+the session-driven playbook (next section) that drives the runner one
+composed query at a time.
+
+- **`investigate`** (**DEFAULT — deepest**) — question-driven agentic
+  research; the session runs the compose → fire → read → drill → synthesize
+  loop itself, reading the platforms from inside. Full playbook below — this
+  runs unless the user asks for something faster.
+- **`single`** (opt-down, `--mode single`) — one blanket query per channel
+  (`"LLM agent memory"` → one Grok blob, one Gemini blob, one Reddit blob…).
+  Fast, cheap, broad — only when the user wants a quick scan, not real depth.
+  The STEP 0 workflow above.
 - **`entity-fanout`** — actual deep research. It (1) **enumerates the top-N
   entities** for the topic (GitHub top-repos-by-stars + HN mentions, free; an
   LLM lens enriches and is *required* for product/people-shaped topics that have
@@ -227,11 +241,9 @@ section) that drives the runner one composed query at a time:
   complete. Zero paid keys still yields a real matrix from GitHub + HN
   enumeration + free-channel fan-out (repo-shaped topics).
 
-- **`investigate`** — the flagship: question-driven agentic research. Not a
-  `--mode` value — the session runs the loop itself (compose per-source →
-  fire → read → drill → synthesize, bounded) using the runner's per-source
-  fire primitive, one short composed query per source per round. Full
-  playbook in the next section.
+(For the full `investigate` contract — not a `--mode` value; the session
+runs the loop itself using the runner's per-source fire primitive, one short
+composed query per source per round — see the next section.)
 
 ## INVESTIGATE MODE — question-driven deep research (the flagship)
 
