@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Parallel multi-channel deep research — LLM lenses (Gemini/Grok/Perplexity; OpenAI opt-in) + direct connectors (HN, Hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis. ALWAYS produce a research plan first, then run. By default it does NOT bill Anthropic/OpenAI APIs. Use for any topic that needs multi-source diligence — tech investigation, comparative analysis, scientific landscape, real user voices vs marketing, hiring-market hotness, contradictions between sources. NOT for one-off fact-checks.
+description: Parallel multi-channel deep research with native, full-breadth social/community depth — LLM lenses (Gemini/Grok/Perplexity; OpenAI opt-in) + direct connectors (HN, Hiring-signal, Polymarket, GitHub, Reddit, Bluesky) + Claude synthesis, plus an investigate mode - question-driven agentic research that reads the platforms from inside (live X, Telegram, full Reddit archive) and cites auditable primary evidence. ALWAYS produce a research plan first, then run. By default it does NOT bill Anthropic/OpenAI APIs. Use for any topic that needs multi-source diligence — tech investigation, comparative analysis, scientific landscape, real user voices vs marketing, hiring-market hotness, contradictions between sources. NOT for one-off fact-checks.
 ---
 
 # Deep Research — plan first, then multi-channel pull + synthesis
@@ -9,6 +9,12 @@ Use when normal web search isn't enough — you need to *triangulate*
 across very different source types (reasoning-model lenses **and** raw
 platform signal) and surface contradictions, not just retrieve the
 top-ranked summary.
+
+The edge is QUALITY: native, full-breadth social/community depth — this
+tool reads the platforms from inside (live X, Telegram communities, the
+full Reddit archive) and backs every load-bearing claim with a real quote,
+an author handle, and a clickable live link. A web-index researcher sees
+only the indexed scraps. "Free/cheaper" is not the pitch — quality is.
 
 ## STEP 0 — RESEARCH PLAN (mandatory, before any run)
 
@@ -172,9 +178,11 @@ optionally renders a shareable `brief.html`.
 - Pure academic lit review — Scholar/arXiv/Semantic Scholar are better primaries.
 - Internal codes / private APIs — not in public sources.
 
-## Two modes — broad-scan (default) vs entity fan-out
+## Three modes — broad-scan, entity fan-out, investigate
 
-The runner has two modes, chosen with `--mode`:
+Three research modes. `single` and `entity-fanout` live in the runner and
+are chosen with `--mode`; `investigate` is a session-driven playbook (next
+section) that drives the runner one composed query at a time:
 
 - **`single`** (default) — one blanket query per channel (`"LLM agent memory"`
   → one Grok blob, one Gemini blob, one Reddit blob…). Fast, cheap, broad. This
@@ -218,6 +226,144 @@ The runner has two modes, chosen with `--mode`:
   a free channel was mostly rate-limited, so a hollow matrix is never sold as
   complete. Zero paid keys still yields a real matrix from GitHub + HN
   enumeration + free-channel fan-out (repo-shaped topics).
+
+- **`investigate`** — the flagship: question-driven agentic research. Not a
+  `--mode` value — the session runs the loop itself (compose per-source →
+  fire → read → drill → synthesize, bounded) using the runner's per-source
+  fire primitive, one short composed query per source per round. Full
+  playbook in the next section.
+
+## INVESTIGATE MODE — question-driven deep research (the flagship)
+
+Takes one research question — "State of X in 2026 — where are the
+problems?" — and answers it with a **problems-first landscape report**
+built from primary evidence. The session is the researcher brain: it
+composes the queries, reads every result, follows the leads, and writes
+the synthesis. The Python runner stays a set of stateless per-source query
+tools. No black box anywhere in the loop.
+
+**Positioning — lead with QUALITY.** The win is native, full-breadth
+social/community depth: the loop reads the platforms **from inside** —
+live X via Grok's `x_search`, Telegram communities through a real client
+session (no web trace at all), the full Reddit archive via Arctic-Shift
+(months deep, not top-of-Google), Threads, TikTok/IG, Bluesky — plus
+GitHub issues and HN. A web-index researcher (Parallel, Perplexity) only
+sees the indexed scraps (`site:twitter.com`) and hands back synthesized
+citations you must re-verify; here every load-bearing claim ships as a
+real quote + author handle + clickable live link — auditable primary
+evidence. One line to keep the pitch honest: **"free/cheaper" is NOT the
+pitch — quality is** (the tool stays free-capable, but that is a property,
+not the argument). On compounding, say it straight: connect Cartographer
+(the neighboring product) and run feedback compounds your research profile
+across runs; without it, feedback is a local save the next run reads —
+useful, not learning.
+
+### STEP I0 — read prior feedback for this topic
+
+Before composing anything, check what earlier runs on this topic left
+behind (`investigate_feedback.py` has no hyphen — it imports clean):
+
+```bash
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+python3 -c "import sys, json; sys.path.insert(0, '$SKILL_DIR/scripts'); \
+from investigate_feedback import read_recent; \
+print(json.dumps(read_recent('<topic>', 5), indent=2))"
+```
+
+(or read `<secrets-dir>/investigate-feedback.jsonl` directly and filter
+rows by topic). Each row carries the composed queries, sources used,
+coverage, and the human note from a previous run. Adapt composition:
+reuse what the note praised, drop the sources it called stale or noisy.
+Empty ledger → compose fresh, no ceremony.
+
+### STEP I1 — COMPOSE per-source queries (this is where the run is won)
+
+**HARD RULE: Compose short target-scoped queries — NEVER fire a blanket
+natural-language sentence.** (A blanket sentence returned zero across
+every keyword channel in live testing; a short repo-scoped query on the
+same topic surfaced the exact real issue.) The direct connectors are
+keyword engines — aim each at what it answers best:
+
+| Source | Compose like |
+|---|---|
+| **github-issues** | `owner/repo` (repo-scoped issue+comment mode) or 1–3 sharp terms |
+| **grok** (live X) | live-X operators — exact @handles, quoted phrases, product names |
+| **reddit** | subreddit + entity terms (`r/LocalLLaMA mem0`), never a sentence |
+| **telegram** | exact channel names / the terms those channels actually use |
+| **gemini** | talk/video phrasing — `conference talk 2026 <topic> lessons` |
+| **hackernews / github / bluesky** | 1–3 sharp terms, the entity's real name |
+
+Allocate the run first (the STEP 0 allocation — `--allocate-run`), then
+write the composed queries into `research-plan.md` inside the run BEFORE
+firing (plan-first: the plan is the contract that later drill-down rounds
+amend, not decoration).
+
+### STEP I2 — FIRE each composed query
+
+```bash
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+SCRIPT="$SKILL_DIR/scripts/deep-research.py"
+RUN_DIR="/absolute/run/path/from/allocation"
+python3 "$SCRIPT" "<composed query>" --fire <source> --output-dir "$RUN_DIR"
+```
+
+The positional argument IS the composed query — the runner never rewrites
+it (an `owner/repo` query reaches github-issues' repo mode untouched).
+stdout is exactly one JSON envelope `{source, path, items, status,
+provenance}`: read it, open `path` for the evidence, keep `provenance` —
+it feeds the coverage-receipts. A failing channel degrades to an
+`.ERROR.md` twin with `status: "error"`; the envelope tells you, the exit
+code stays 0. Repeated fires into the same `--output-dir` accumulate one
+`manifest.json`.
+
+### STEP I3 — READ + DRILL (bounded)
+
+Read every result file. Spot the leads: named repos, recurring
+complaints, people who keep showing up, systems mentioned in passing.
+Compose targeted follow-ups and fire again — problem-hunting lives on
+**github-issues** (repo-scoped: the actual open wounds) and **X via grok**
+(who is complaining right now, in their own words). Bounds:
+
+- **4 rounds max** by default; stop earlier the moment a round surfaces
+  no new leads.
+- **Paid-lens budget:** grok / gemini / perplexity fires bill real vendor
+  tokens — keep them for the leads that matter, not for round-one carpet
+  coverage. The free channels (hackernews, github, github-issues, reddit,
+  bluesky) carry the breadth.
+
+### STEP I4 — SYNTHESIZE the problems-first report
+
+Write the landscape report as `synthesis.md` in the run dir. Structure:
+**the landscape → where the problems are → top unsolved problems.** Every
+load-bearing claim carries a real quote + author handle + clickable link
+to the live primary thread — a claim without those is not load-bearing;
+demote or drop it.
+
+### STEP I5 — COVERAGE-RECEIPTS + FEEDBACK
+
+```bash
+SKILL_DIR="/absolute/directory/containing/the/loaded/SKILL.md"
+SCRIPT="$SKILL_DIR/scripts/deep-research.py"
+RUN_DIR="/absolute/run/path/from/allocation"
+python3 "$SCRIPT" --coverage "$RUN_DIR"
+python3 "$SCRIPT" --render-html "$RUN_DIR/synthesis.md" \
+    --html-out "$RUN_DIR/brief.html"
+```
+
+`--coverage` appends the coverage section from the manifest's recorded
+provenance — what a web-index researcher structurally cannot reach
+("Telegram community, no web footprint", "X post 3h ago — not yet
+indexed"). Markers render ONLY from real provenance records, never
+inferred; a run with nothing unreachable honestly says so. Then ask the
+human what was useful and what was noise, and persist the answer:
+
+```bash
+python3 "$SCRIPT" --feedback "<note>" --topic "<topic>"
+```
+
+Honest copy, always: the note is **saved locally to inform the next run**
+on this topic — relayed to Cartographer only when one is actually
+connected. Never say "learned".
 
 ## Onboarding (first run) — the wizard IS the conversation
 
