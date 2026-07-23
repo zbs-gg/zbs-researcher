@@ -71,6 +71,13 @@ class NoteTsTests(unittest.TestCase):
         dr._note_ts(sink, "")
         self.assertEqual(sink, [])  # a missing timestamp must not fake fresh=0
 
+    def test_drops_future_timestamp(self):
+        # A clock-skewed/hallucinated future item must not clamp to a fake 0h.
+        sink = []
+        dr._note_ts(sink, time.time() + 7200)  # 2h ahead -> dropped
+        dr._note_ts(sink, time.time() - 60)    # 1min ago -> kept
+        self.assertEqual(len(sink), 1)
+
 
 class XSnowflakeTests(unittest.TestCase):
     # id 2080203643035525617 -> 2026-07-23 08:09 UTC (verified against grok out)
@@ -113,6 +120,25 @@ class XSnowflakeTests(unittest.TestCase):
         dr._note_x_post_ages(sink, "https://x.com/a/status/1")
         dr._note_x_post_ages(sink, "https://x.com/a/status/9999999999999999999999999")
         self.assertEqual(sink, [])
+
+    @staticmethod
+    def _id_for_epoch(epoch_s):
+        ms = int(epoch_s * 1000) - 1288834974657
+        return str(ms << 22)
+
+    def test_near_future_id_dropped_not_faking_zero(self):
+        # A hallucinated/future post 2h ahead must be DROPPED, never clamped to
+        # a fake 0h "posted now" (the honesty invariant / review finding 1).
+        sink = []
+        future_id = self._id_for_epoch(time.time() + 7200)
+        dr._note_x_post_ages(sink, f"https://x.com/a/status/{future_id}")
+        self.assertEqual(sink, [])
+
+    def test_recent_past_id_kept(self):
+        sink = []
+        recent_id = self._id_for_epoch(time.time() - 3600)  # 1h ago, real
+        dr._note_x_post_ages(sink, f"https://x.com/a/status/{recent_id}")
+        self.assertEqual(len(sink), 1)
 
     def test_non_status_x_links_ignored(self):
         sink = []

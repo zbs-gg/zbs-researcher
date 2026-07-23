@@ -414,15 +414,28 @@ def _to_epoch(value):
     return dt.timestamp()
 
 
+# A timestamp more than this far in the future can't be a real item — it's a
+# fabricated/hallucinated id or gross clock skew. Dropping it (rather than
+# clamping its age to 0.0) is the honesty invariant: a future date must never
+# masquerade as "posted 0h ago" and trip the pre-index override. 300s absorbs
+# ordinary server clock skew without letting a hallucinated post through.
+_FUTURE_SKEW_SECONDS = 300.0
+
+
+def _future_ok(epoch):
+    return epoch is not None and epoch <= time.time() + _FUTURE_SKEW_SECONDS
+
+
 def _note_ts(freshness_sink, value):
     """Record one item's timestamp into an optional freshness sink (a list of
     epoch-seconds). The runner turns the newest (max) epoch into the channel's
     newest-item age. Additive and byte-compatible: sink None -> no-op, exactly
-    like usage_sink. Unparseable timestamps are dropped, never zeroed."""
+    like usage_sink. Unparseable OR future-dated timestamps are dropped, never
+    zeroed — a missing/impossible time must not fake freshness=0."""
     if freshness_sink is None:
         return
     epoch = _to_epoch(value)
-    if epoch is not None:
+    if epoch is not None and _future_ok(epoch):
         freshness_sink.append(epoch)
 
 
@@ -438,17 +451,17 @@ _X_SNOWFLAKE_EPOCH_MS = 1288834974657
 
 def _note_x_post_ages(freshness_sink, text):
     """Decode any X/Twitter status IDs in `text` into item timestamps and push
-    them to the freshness sink. Absurd ids (before the snowflake epoch or in the
-    future) are dropped so a malformed link can never fake freshness."""
+    them to the freshness sink. Absurd ids — before the 2010 snowflake epoch, or
+    beyond a small clock-skew tolerance into the future — are dropped so a
+    hallucinated or malformed link can never fake freshness (age 0h)."""
     if freshness_sink is None or not text:
         return
-    horizon = time.time() + 86400.0
     for sid in _X_STATUS_RE.findall(text):
         try:
             ts = ((int(sid) >> 22) + _X_SNOWFLAKE_EPOCH_MS) / 1000.0
         except ValueError:
             continue
-        if 1288834974.0 <= ts <= horizon:
+        if 1288834974.0 <= ts and _future_ok(ts):
             freshness_sink.append(ts)
 
 
