@@ -142,12 +142,24 @@ class ArcticShiftDegradeTests(unittest.TestCase):
         self.assertEqual(n, 0)
         self.assertIn("No posts found", text)
 
-    def test_no_subreddits_discovered_degrades_honestly_without_search(self):
-        fake = FakeArcticShift(subreddits=[])
+    def test_no_name_match_falls_back_to_curated_net_not_blind(self):
+        # New contract: when no subreddit matches the topic by name, discovery
+        # no longer gives up — it falls back to the curated high-signal net and
+        # searches it. With no posts there it still degrades honestly (n=0,
+        # "No posts found"), but Reddit is no longer silently blind: the
+        # curated subs WERE searched.
+        fake = FakeArcticShift(subreddits=[], posts=[])
         n, text = run_channel(fake)
         self.assertEqual(n, 0)
-        self.assertEqual(fake.post_search_urls(), [])
-        self.assertIn("subreddit", text.lower())  # says WHY it is empty
+        searched = fake.post_search_urls()
+        self.assertTrue(searched)  # fallback searched, did not skip
+        curated = {name for name, _ in deep_research._REDDIT_CURATED_SUBS}
+        subs_hit = {
+            urllib.parse.parse_qs(urllib.parse.urlparse(u).query)["subreddit"][0]
+            for u in searched
+        }
+        self.assertTrue(subs_hit & curated)  # the net is the curated set
+        self.assertIn("No posts found", text)
 
     def test_http_error_propagates_so_wrapper_writes_error_md(self):
         err = urllib.error.HTTPError(
@@ -242,6 +254,112 @@ class SubredditDiscoveryTests(unittest.TestCase):
                 "prompt engineering"
             )
         self.assertEqual(subs[0], "PromptEngineering")
+
+
+class CuratedFallbackTests(unittest.TestCase):
+    """The reported failure (0 items): a multi-word technical query whose real
+    home is r/LocalLLaMA, a name no query token prefixes. Name-prefix discovery
+    returns only off-topic junk (r/Agent_SEO); the curated fallback is what
+    turns a silent zero into dated, on-topic posts — and re-feeds the freshness
+    axis eval_harness reads."""
+
+    FAILING_QUERY = "AI agent memory Mem0 Letta problems"
+
+    def test_junk_prefix_matches_fall_back_to_curated_and_return_dated_posts(self):
+        junk_subs = [
+            {"display_name": "Agent_SEO", "subscribers": 1200,
+             "title": "", "public_description": "seo agents marketing"},
+            {"display_name": "MemoryDefrag", "subscribers": 300,
+             "title": "", "public_description": "defrag memes"},
+        ]
+        curated = {name for name, _ in deep_research._REDDIT_CURATED_SUBS}
+        # The real, dated, on-topic post lives in a curated sub — junk subs
+        # yield nothing, exactly as observed live.
+        hit = post("zzz999", "Benchmarked 4 agent memory systems: Mem0 vs Letta",
+                   score=340, num_comments=88, subreddit="LocalLLaMA")
+
+        def fake(url, headers=None, timeout=30):
+            if "/api/subreddits/search" in url:
+                return {"data": junk_subs}
+            if "/api/posts/search" in url:
+                params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+                sub = params["subreddit"][0]
+                return {"data": [hit] if sub in curated else []}
+            raise AssertionError(f"unexpected URL: {url}")
+
+        sink = []
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "reddit.md"
+            with mock.patch.object(deep_research, "get_json", fake):
+                n = deep_research.channel_reddit(self.FAILING_QUERY, out, 5, sink)
+            text = out.read_text()
+
+        self.assertGreaterEqual(n, 1)  # was 0 before the fallback
+        self.assertIn("Benchmarked 4 agent memory systems", text)
+        self.assertIn("r/LocalLLaMA", text)
+        self.assertTrue(sink)  # freshness axis fed — eval_harness reads this
+
+    def test_curated_fallback_ranking_is_deterministic_and_on_topic(self):
+        subs = deep_research._curated_fallback_subs(self.FAILING_QUERY)
+        self.assertEqual(subs, deep_research._curated_fallback_subs(self.FAILING_QUERY))
+        self.assertLessEqual(len(subs), deep_research._REDDIT_MAX_SUBS)
+        # an AI-agent-memory query surfaces the LLM/agent hubs, not e.g. r/SaaS
+        self.assertIn("LocalLLaMA", subs)
+        self.assertTrue({"AI_Agents", "LangChain"} & set(subs))
+
+    def test_single_token_query_does_not_force_every_prefix_match_relevant(self):
+        # Regression: for a single-token query the topic "concatenation" equals
+        # the subreddit_prefix, so every prefix hit contains it. The concat
+        # override must NOT fire here, or a big off-topic sub (r/ragdoll for
+        # "rag") would be forced relevant and outrank the real one by size.
+        ragdoll = {"display_name": "ragdoll", "subscribers": 200000,
+                   "title": "Ragdoll cats", "public_description": "ragdoll cat breed pictures"}
+        real = {"display_name": "Rag", "subscribers": 5000, "title": "RAG",
+                "public_description": "retrieval augmented generation rag for llms"}
+
+        def fake(url, headers=None, timeout=30):
+            assert "/api/subreddits/search" in url
+            return {"data": [ragdoll, real]}
+
+        with mock.patch.object(deep_research, "get_json", fake):
+            subs = deep_research._arctic_shift_discover_subreddits("rag")
+        self.assertIn("Rag", subs)
+        # the real (on-topic, smaller) sub must beat the huge off-topic one
+        self.assertLess(subs.index("Rag"), subs.index("ragdoll")
+                        if "ragdoll" in subs else len(subs))
+        self.assertNotEqual(subs[0], "ragdoll")
+
+    def test_single_token_query_with_only_offtopic_prefix_hits_uses_curated(self):
+        # "rag" where the only prefix hit is off-topic (r/ragdoll): nothing
+        # clears the floor -> the curated net rescues it instead of searching
+        # the cat subreddit.
+        ragdoll = {"display_name": "ragdoll", "subscribers": 200000,
+                   "title": "Ragdoll cats", "public_description": "ragdoll cat breed pictures"}
+
+        def fake(url, headers=None, timeout=30):
+            assert "/api/subreddits/search" in url
+            return {"data": [ragdoll]}
+
+        with mock.patch.object(deep_research, "get_json", fake):
+            subs = deep_research._arctic_shift_discover_subreddits("rag")
+        curated = {name for name, _ in deep_research._REDDIT_CURATED_SUBS}
+        self.assertTrue(set(subs) & curated)
+        self.assertNotEqual(subs[0], "ragdoll")
+
+    def test_strong_name_match_short_circuits_fallback(self):
+        # A real on-topic name match must NOT trigger the curated net (no
+        # behaviour change / no extra breadth for queries that already work).
+        row = {"display_name": "LocalLLaMA", "subscribers": 550000,
+               "title": "LocalLLaMA",
+               "public_description": "AI agent memory, Mem0, Letta and local LLMs"}
+
+        def fake(url, headers=None, timeout=30):
+            assert "/api/subreddits/search" in url
+            return {"data": [row]}
+
+        with mock.patch.object(deep_research, "get_json", fake):
+            subs = deep_research._arctic_shift_discover_subreddits(self.FAILING_QUERY)
+        self.assertEqual(subs, ["LocalLLaMA"])
 
 
 class ConnectorRegistryTests(unittest.TestCase):

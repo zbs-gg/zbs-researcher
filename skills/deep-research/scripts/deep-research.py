@@ -995,6 +995,47 @@ _REDDIT_POOL_PER_SUB = 25   # posts pulled per subreddit before ranking
 _REDDIT_WINDOW_DAYS = 365   # recency window
 _ARCTIC_SHIFT_RETRY_SLEEP = 3.0  # seconds before the single 429 retry
 
+# Curated high-signal subreddits used as a discovery fallback. Arctic-Shift's
+# subreddit index is prefix-only (its /subreddits/search rejects a free-text
+# `query` with 400), so a multi-word technical topic like "AI agent memory
+# Mem0 Letta" matches NO subreddit by name — r/LocalLLaMA is not prefixed by
+# "agent" or "memory". Without a net, Reddit (the freshest free channel) goes
+# silently blind on exactly the queries this tool exists for. Each entry pairs
+# a real, active subreddit with a focus-tag blob; the fallback ranks these by
+# how well the tags match the query, ties broken by list order (broadest,
+# highest-traffic first), so even an unmatched query lands on a sane default.
+_REDDIT_CURATED_SUBS = (
+    ("LocalLLaMA", "llm local model inference agent memory rag context ai open source quantization"),
+    ("MachineLearning", "machine learning ml research paper model training deep neural ai dataset"),
+    ("artificial", "artificial intelligence ai general news agi model chatbot llm"),
+    ("singularity", "ai agi artificial intelligence future model breakthrough llm"),
+    ("LangChain", "langchain llm agent framework rag retrieval memory tool orchestration vector"),
+    ("LLMDevs", "llm developer api agent build engineering prompt tool integration"),
+    ("AI_Agents", "ai agent autonomous tool memory planning workflow orchestration multi"),
+    ("Rag", "rag retrieval augmented generation vector embedding memory context chunking"),
+    ("OpenAI", "openai gpt chatgpt api model agent function assistant"),
+    ("ClaudeAI", "claude anthropic llm assistant api agent mcp"),
+    ("datascience", "data science analytics statistics ml pipeline python model"),
+    ("deeplearning", "deep learning neural network model training gpu ai"),
+    ("programming", "software programming code developer engineering language framework"),
+    ("startups", "startup founder saas product launch business fundraising growth"),
+    ("SaaS", "saas software product pricing churn startup subscription b2b"),
+)
+
+
+def _curated_fallback_subs(query, limit=_REDDIT_MAX_SUBS):
+    """Pick high-signal subreddits to search when name-prefix discovery finds
+    no on-topic sub. Rank the curated set by how well each sub's focus tags
+    match the query; ties break by curated priority (list order), so a query
+    that matches nothing still falls back to the broadest high-traffic subs.
+    Deterministic, no network."""
+    scored = [
+        (-relevance_score(tags, query), prio, name)
+        for prio, (name, tags) in enumerate(_REDDIT_CURATED_SUBS)
+    ]
+    scored.sort()
+    return [name for _, _, name in scored[:limit]]
+
 
 def _arctic_shift_json(url, timeout=30):
     """GET with ONE polite retry on 429 — Arctic-Shift rate-limits complex
@@ -1015,10 +1056,24 @@ def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
     filter — verified live 2026-07-17: 400 \"'query' query parameter requires
     one of: author, subreddit\". So: prefix-match distinctive topic tokens
     against the subreddit index, keep the candidates whose name/description
-    actually relate to the topic, best (relevance, subscribers) first."""
+    actually relate to the topic, best (relevance, subscribers) first.
+
+    Multi-word technical queries usually match NO subreddit by name (the home
+    of "AI agent memory Mem0 Letta" is r/LocalLLaMA, which no query token
+    prefixes), leaving only off-topic noise (r/Agent_SEO, r/MemoryDefrag) that
+    yields zero posts. So candidates below the topic-relevance floor are not
+    trusted: when none clear it we fall back to the curated high-signal net
+    (r/LocalLLaMA, r/LangChain, r/MachineLearning, …) rather than go blind."""
     candidates = {}
-    joined_topic = "".join(_rank_tokens(query))  # "prompt engineering" -> "promptengineering"
-    for token in _rank_tokens(query)[:5]:
+    topic_tokens = _rank_tokens(query)
+    # Only a MULTI-token topic has a meaningful concatenation ("prompt
+    # engineering" -> "promptengineering"). For a single-token query the
+    # "concatenation" IS the token, which is also the subreddit_prefix, so
+    # every candidate would contain it — that would force rel=1.0 on all of
+    # them (e.g. r/ragdoll for "rag"), nuking the relevance floor and the
+    # curated fallback. So gate the override on >1 distinctive token.
+    joined_topic = "".join(topic_tokens) if len(topic_tokens) > 1 else ""
+    for token in topic_tokens[:5]:
         if len(token) < 3:
             continue
         url = f"{ARCTIC_SHIFT_BASE}/subreddits/search?" + urllib.parse.urlencode(
@@ -1034,13 +1089,30 @@ def _arctic_shift_discover_subreddits(query, limit=_REDDIT_MAX_SUBS):
             )
             rel = relevance_score(about, query)
             # CamelCase names tokenize to one word ("PromptEngineering") and
-            # would score 0 — a name that IS the topic concatenated is the
-            # strongest possible signal.
+            # would score 0 — a name that IS the multi-word topic concatenated
+            # is the strongest possible signal.
             if joined_topic and joined_topic in name.lower():
                 rel = 1.0
             candidates[name] = (rel, row.get("subscribers") or 0)
     ordered = sorted(candidates.items(), key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))
-    return [name for name, _ in ordered[:limit]]
+    strong = [name for name, (rel, _) in ordered if rel >= RELEVANCE_FLOOR]
+    if strong:
+        return strong[:limit]
+    # No name matched the topic — search the curated net. (A genuine on-topic
+    # sub carries its own name/description, so it clears the floor as `strong`
+    # above; the leftover prefix hits here are false positives like r/ragdoll
+    # for "rag", trusted only as a defensive tail if the curated net ever comes
+    # up short of `limit`.) Dedup keeps first occurrence.
+    result, seen = [], set()
+    weak = [name for name, _ in ordered]
+    for name in _curated_fallback_subs(query, limit) + weak:
+        if name in seen:
+            continue
+        seen.add(name)
+        result.append(name)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def channel_reddit(query, out_path, max_items, freshness_sink=None):
