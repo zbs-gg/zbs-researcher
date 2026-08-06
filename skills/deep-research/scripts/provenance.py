@@ -64,12 +64,17 @@ def _format_hours(hours):
     return str(hours)
 
 
-def web_index_reachable(source, newest_item_age_hours=None, self_sourced=False):
+def web_index_reachable(source, newest_item_age_hours=None, self_sourced=False,
+                        self_sourced_items=0, items=0):
     """Classify one source: ("yes"|"partial"|"no", human-readable reason).
 
-    `self_sourced` outranks everything: when the run MANUFACTURED the evidence
-    (transcribing a video's audio itself, say), the text provably exists in no
-    index — that is a fact about what we did, not a heuristic about a platform.
+    `self_sourced` says the run MANUFACTURED some of the evidence (transcribing
+    a video's audio itself, say) — text that provably exists in no index. That
+    is a fact about what we did, not a heuristic about a platform, so it
+    outranks the table. But it only earns a flat "no" when it covers EVERY
+    item: with 1 self-produced transcript among 5 results, calling the whole
+    source unreachable would relabel four rows a web index can read perfectly
+    well. A partial claim stays "partial" and says the real ratio.
 
     Otherwise applies the static table, then the freshness override: a
     live-social "partial" source whose newest item is under
@@ -77,8 +82,16 @@ def web_index_reachable(source, newest_item_age_hours=None, self_sourced=False):
     index. An unknown age (None) never triggers the override.
     """
     if self_sourced:
-        return "no", ("produced by this run (own transcription) — this text "
-                      "exists in no web index")
+        produced = max(1, int(self_sourced_items or 0))
+        total = max(produced, int(items or 0))
+        if produced >= total:
+            return "no", ("produced by this run (own transcription) — this "
+                          "text exists in no web index")
+        return "partial", (
+            f"{produced} of {total} items produced by this run (own "
+            "transcription) — that text exists in no web index; the rest is "
+            "as reachable as the table says"
+        )
     tag, reason = _REACHABILITY.get(source, ("yes", _UNKNOWN_REASON))
     if (
         tag == "partial"
@@ -92,7 +105,8 @@ def web_index_reachable(source, newest_item_age_hours=None, self_sourced=False):
 
 
 def provenance_record(source, query, items, newest_item_age_hours=None,
-                      fetched_at=None, self_sourced=False):
+                      fetched_at=None, self_sourced=False,
+                      self_sourced_items=0):
     """Build the truthful per-fire provenance record (pure, no network).
 
     `items` is the fired result — a list (counted) or an already-known int
@@ -105,7 +119,10 @@ def provenance_record(source, query, items, newest_item_age_hours=None,
     count = items if isinstance(items, int) else len(items or [])
     freshness = newest_item_age_hours if count else None
     tag, reason = web_index_reachable(
-        source, freshness, self_sourced=bool(self_sourced) and bool(count)
+        source, freshness,
+        self_sourced=bool(self_sourced) and bool(count),
+        self_sourced_items=self_sourced_items,
+        items=count,
     )
     if fetched_at is None:
         fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")

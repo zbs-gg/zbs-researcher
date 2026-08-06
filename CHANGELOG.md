@@ -45,8 +45,8 @@ published under the ZBS organization.
   reads `npx -y @zbs-gg/zbs-researcher@latest` and matches the GitHub slug the
   installer already uses (`claude plugin marketplace add zbs-gg/zbs-researcher`).
   npm has no `org/name` form — only a scope shows the owner in the name. The
-  old unscoped `zbs-researcher` is deprecated with a pointer to the new name
-  rather than unpublished, so anything already depending on it keeps working.
+  old unscoped `zbs-researcher` has been unpublished; `0.1.0` can never be
+  republished under that name, which is the accepted cost of removing it.
 - Housekeeping: plugin, marketplace and npm installer versions are one number
   again (0.5.0 — they had drifted to 0.4.0/0.1.1); plugin and marketplace
   ownership moved from the personal account to the ZBS organization; the

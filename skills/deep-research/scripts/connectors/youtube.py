@@ -14,20 +14,27 @@ Pipeline per run:
                  another lens). Ranked through the runner's shared rank_items
                  (relevance floor + bounded engagement on view counts).
   2. captions  — ONE yt-dlp call per video does double duty: `--dump-json`
-                 gives metadata (duration, upload timestamp, language, and the
-                 `subtitles` map that says which languages are HUMAN-made),
-                 while `--no-simulate --write-subs --write-auto-subs` lands the
-                 json3 tracks. Preference: manual > auto original-language >
-                 machine-translated.
-  3. judge     — _caption_quality scores what landed. Missing, machine
+                 gives metadata (duration, upload timestamp, spoken language,
+                 and the `subtitles` map that says which languages are
+                 HUMAN-made), while `--no-simulate --write-subs
+                 --write-auto-subs` lands the json3 tracks.
+  3. judge     — caption_quality scores what landed. Missing, machine
                  translated, unpunctuated raw ASR, or suspiciously sparse
                  relative to the runtime all fail, and the REASON is printed.
   4. fallback  — a failed track sends the audio through media_backend's
-                 transcriber (local MLX / Groq / OpenRouter, per the user's
-                 route), bounded by TRANSCRIBE_TOP and MAX_TRANSCRIBE_SECONDS.
+                 transcriber, bounded by the per-run budgets below.
   5. report    — every video carries an explicit provenance label, so a reader
                  always knows whether a quote came from a human caption, a
-                 machine caption, or our own Whisper pass.
+                 machine caption, or our own Whisper pass. Full transcripts are
+                 written beside the report so any quote stays auditable.
+
+PROVENANCE IS DERIVED FROM METADATA, NEVER FROM A FILENAME. A language present
+in the metadata's `subtitles` map is human-made. A track whose base language
+differs from the video's spoken language is a machine TRANSLATION of a machine
+transcript — the worst tier — and that comparison is the only reliable test:
+YouTube serves a translated auto-caption for a Russian video under the bare code
+`en`, so any dash-in-the-code heuristic both misses those and wrongly condemns
+ordinary regional tracks like `pt-BR`.
 
 yt-dlp is an OPTIONAL dependency, the same tier as Telethon and MLX: the
 binary on PATH is preferred, the `yt_dlp` Python module is the fallback, and
@@ -52,6 +59,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from . import excerpt as _excerpt
@@ -65,10 +73,18 @@ DEFAULT_READ_TOP = 5
 DEFAULT_TRANSCRIBE_TOP = 3
 DEFAULT_MAX_SECONDS = 45 * 60
 DEFAULT_SUB_LANGS = "en-orig,en"
+# Wall-clock ceiling for the WHOLE channel. Without it the per-call timeouts
+# stack: 5 metadata reads plus 3 audio downloads could hold a run for ~45
+# minutes against a documented 3-7 minute expectation.
+DEFAULT_DEADLINE_SECONDS = 8 * 60
 AUDIO_BYTES_CAP = 25 * 1024 * 1024
 SEARCH_TIMEOUT = 120
 VIDEO_TIMEOUT = 180
 AUDIO_TIMEOUT = 600
+# The retry exists to survive a transient format refusal, not to wait out a
+# second full download.
+AUDIO_RETRY_TIMEOUT = 240
+TRANSCRIPT_DIR_NAME = "youtube-transcripts"
 
 _URL_RE = re.compile(
     r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?\S*?v=|shorts/|live/)|youtu\.be/)"
@@ -90,6 +106,7 @@ INSTALL_HINT = (
 SOURCE_MANUAL = "human-written captions"
 SOURCE_AUTO = "YouTube auto-captions"
 SOURCE_WHISPER = "our own transcription"
+SOURCE_REJECTED = "captions found but unusable"
 SOURCE_NONE = "no transcript — metadata only"
 
 
@@ -120,6 +137,10 @@ def _max_seconds():
     return _int_env("DEEP_RESEARCH_YOUTUBE_MAX_SECONDS", DEFAULT_MAX_SECONDS)
 
 
+def _deadline_seconds():
+    return _int_env("DEEP_RESEARCH_YOUTUBE_DEADLINE", DEFAULT_DEADLINE_SECONDS)
+
+
 def _sub_langs():
     return os.environ.get(
         "DEEP_RESEARCH_YOUTUBE_SUB_LANGS", ""
@@ -145,22 +166,34 @@ def _yt_dlp_argv():
 def _run_yt_dlp(args, timeout):
     """Run yt-dlp with an argument LIST. Returns (returncode, stdout, stderr).
 
+    `--ignore-config` is not optional hardening: yt-dlp reads a `yt-dlp.conf`
+    from the CURRENT DIRECTORY, and research runs execute inside whatever
+    project the user launched from. Without it, checking out a repository that
+    carries such a file would let it inject arbitrary yt-dlp options — including
+    ones that execute commands — into every run. The child also gets a private
+    empty cwd so no config, cookie, or output file can be picked up by accident.
+
     Never raises on a non-zero exit: yt-dlp routinely partial-fails (one
     unavailable track, one age-gated video) while still producing usable
     output, so the CALLER decides what a failure means.
     """
-    argv = _yt_dlp_argv() + list(args)
+    argv = _yt_dlp_argv() + ["--ignore-config"] + list(args)
     try:
-        # Argument LIST only — no shell interpolation, so a topic containing
-        # quotes or semicolons is data, never something the OS can execute.
-        completed = subprocess.run(  # noqa: S603
-            argv,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory() as sandbox:
+            # Argument LIST only — no shell interpolation, so a topic
+            # containing quotes or semicolons is data, never something the OS
+            # can execute.
+            completed = subprocess.run(  # noqa: S603
+                argv,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+                cwd=sandbox,
+            )
     except subprocess.TimeoutExpired:
         return 1, "", f"yt-dlp timed out after {timeout}s"
+    except OSError as exc:
+        return 1, "", f"could not run yt-dlp: {exc}"
     return (
         completed.returncode,
         completed.stdout.decode("utf-8", "replace"),
@@ -274,28 +307,56 @@ def _fetch_metadata_and_subs(video, workdir):
     return meta
 
 
-def _pick_track(video_id, workdir, meta):
-    """Choose the best caption file. Returns (path, lang, kind) or None.
+def _base_lang(code):
+    """Primary subtag of a language code: 'pt-BR' -> 'pt', 'en-orig' -> 'en'."""
+    return (code or "").split("-", 1)[0].strip().lower() or None
 
-    kind is "manual" | "auto" | "translated". Provenance is authoritative,
-    not guessed: a language present in the metadata's `subtitles` map is
-    human-made; anything else came from `automatic_captions`.
+
+def _spoken_language(meta):
+    """The language actually spoken in the video.
+
+    `language` when yt-dlp reports it; otherwise the `<lang>-orig` key that
+    YouTube uses to mark the original-language auto-caption. Returns None when
+    neither is available — and an unknown spoken language must never be used to
+    condemn a track as a translation.
     """
+    spoken = _base_lang(meta.get("language"))
+    if spoken:
+        return spoken
+    for lang in (meta.get("automatic_captions") or {}):
+        if lang.endswith("-orig"):
+            return _base_lang(lang)
+    return None
+
+
+def _classify_track(lang, manual_langs, spoken):
+    """('manual' | 'auto' | 'translated', sort rank) for one caption track.
+
+    Provenance comes from the METADATA, never the filename: a language listed
+    under `subtitles` is human-made. Translation is decided by comparing the
+    track's base language against the SPOKEN language — the only test that
+    catches YouTube serving a translated auto-caption under a bare `en`, and
+    the only one that does not wrongly condemn `pt-BR` or `zh-Hans`.
+    """
+    if lang in manual_langs:
+        return "manual", 0
+    base = _base_lang(lang)
+    if spoken and base and base != spoken:
+        return "translated", 3
+    if lang.endswith("-orig"):
+        return "auto", 1
+    return "auto", 2
+
+
+def _pick_track(video_id, workdir, meta):
+    """Choose the best caption file. Returns (path, lang, kind) or None."""
     manual_langs = set((meta.get("subtitles") or {}).keys())
+    spoken = _spoken_language(meta)
     candidates = []
     for path in sorted(Path(workdir).glob(f"{video_id}.*.json3")):
-        # "<id>.<lang>.json3" -> lang (which may itself contain dots/dashes)
+        # "<id>.<lang>.json3" -> lang (which may itself contain dashes)
         lang = path.name[len(video_id) + 1: -len(".json3")]
-        if lang in manual_langs:
-            kind, rank = "manual", 0
-        elif lang.endswith("-orig"):
-            kind, rank = "auto", 1
-        elif "-" in lang:
-            # "ru-en" = machine translation of a machine transcription: the
-            # worst tier, kept only as a last resort.
-            kind, rank = "translated", 3
-        else:
-            kind, rank = "auto", 2
+        kind, rank = _classify_track(lang, manual_langs, spoken)
         candidates.append((rank, str(path), lang, kind))
     if not candidates:
         return None
@@ -369,50 +430,34 @@ def caption_quality(text, duration=None, kind="auto"):
 # ---------------------------------------------------------------------------
 # Transcription fallback
 # ---------------------------------------------------------------------------
-def _transcriber():
-    """media_backend.get_transcriber() — the route the user chose (local MLX,
-    Groq, or OpenRouter). Imported lazily so the connector loads even where the
-    scripts dir isn't on sys.path."""
+def _media_backend():
+    """The media_backend module — sibling of the runner, imported lazily so the
+    connector loads even where the scripts dir isn't on sys.path."""
     try:
         import media_backend
     except ImportError:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        scripts_dir = str(Path(__file__).resolve().parents[1])
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
         import media_backend
-    return media_backend.get_transcriber()
+    return media_backend
 
 
-def _download_audio(video, workdir):
-    """Fetch an audio-only stream. Returns (bytes, mime).
+def _transcriber():
+    """media_backend.get_transcriber() — the route the user chose."""
+    return _media_backend().get_transcriber()
 
-    Two selectors, tried in order. m4a first: no remux, and every
-    transcription route accepts it. The permissive retry exists because
-    YouTube intermittently serves a restricted format set for a video that
-    lists m4a moments earlier — observed live, and a transient refusal must
-    not cost us the evidence. Only the retry pays for the broader match.
+
+def transcribe_route():
+    """(route, reason) for the audio route that WOULD run, or (None, reason).
+
+    Resolved BEFORE any audio is downloaded: with no route configured there is
+    nothing to gain from fetching megabytes we cannot transcribe.
     """
-    attempts = ["bestaudio[ext=m4a]/bestaudio", "bestaudio*/best"]
-    last = ""
-    for selector in attempts:
-        code, _stdout, stderr = _run_yt_dlp(
-            [
-                "-f", selector,
-                "--no-warnings",
-                "-o", str(Path(workdir) / "audio.%(ext)s"),
-                video["url"],
-            ],
-            timeout=AUDIO_TIMEOUT,
-        )
-        files = sorted(Path(workdir).glob("audio.*"))
-        if files:
-            path = files[0]
-            blob = path.read_bytes()[:AUDIO_BYTES_CAP]
-            if blob:
-                return blob, _audio_mime(path.suffix)
-            last = "audio download produced an empty file"
-            path.unlink(missing_ok=True)
-            continue
-        last = f"exit {code}: {(stderr or '').strip()[:200]}"
-    raise RuntimeError(f"audio download produced no file ({last})")
+    try:
+        return _media_backend().resolve_transcribe_route()
+    except Exception as exc:  # noqa: BLE001 — availability probe, never fatal
+        return None, f"transcription backend unavailable ({str(exc)[:80]})"
 
 
 _AUDIO_MIME = {
@@ -432,6 +477,88 @@ def _audio_mime(suffix):
     return _AUDIO_MIME.get(suffix.lower(), "audio/mp4")
 
 
+def _completed_audio_files(workdir):
+    """Fully-written audio files only.
+
+    yt-dlp leaves `.part` / `.ytdl` / `.fN.` fragments behind when a download
+    is interrupted. Globbing `audio.*` would hand one of those to the vendor as
+    if it were the whole soundtrack, and a partial transcript presented as
+    complete is exactly the failure this connector exists to avoid.
+    """
+    return sorted(
+        path for path in Path(workdir).glob("audio.*")
+        if path.suffix.lower() in _AUDIO_MIME
+    )
+
+
+def _clear_audio(workdir):
+    for path in Path(workdir).glob("audio.*"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _download_audio(video, workdir):
+    """Fetch an audio-only stream. Returns (bytes, mime).
+
+    Two selectors, tried in order. m4a first: no remux, and every
+    transcription route accepts it. The permissive retry exists because
+    YouTube intermittently serves a restricted format set for a video that
+    listed m4a moments earlier — observed live, and a transient refusal must
+    not cost us the evidence. Both selectors stay AUDIO-only so a fallback can
+    never quietly pull a full video stream, and `--max-filesize` refuses an
+    oversized file at the tool instead of after it has hit the disk.
+    """
+    cap_mb = max(1, AUDIO_BYTES_CAP // (1024 * 1024))
+    attempts = (
+        ("bestaudio[ext=m4a]/bestaudio", AUDIO_TIMEOUT),
+        ("bestaudio*", AUDIO_RETRY_TIMEOUT),
+    )
+    last = ""
+    for selector, timeout in attempts:
+        # A stale fragment from a previous attempt must never be mistaken for
+        # this attempt's output.
+        _clear_audio(workdir)
+        code, _stdout, stderr = _run_yt_dlp(
+            [
+                "-f", selector,
+                "--max-filesize", f"{cap_mb}M",
+                # A live stream has no meaningful duration, so the length cap
+                # cannot bound it — refuse it here instead.
+                "--match-filter", "!is_live",
+                "--no-warnings",
+                "-o", str(Path(workdir) / "audio.%(ext)s"),
+                video["url"],
+            ],
+            timeout=timeout,
+        )
+        files = _completed_audio_files(workdir)
+        if code != 0:
+            last = f"exit {code}: {(stderr or '').strip()[:200]}"
+            continue
+        if not files:
+            last = (
+                f"no audio file (exit {code}): {(stderr or '').strip()[:200]}"
+            )
+            continue
+        path = files[0]
+        size = path.stat().st_size
+        if size == 0:
+            last = "audio download produced an empty file"
+            continue
+        if size > AUDIO_BYTES_CAP:
+            # Refuse rather than slice. Sending the first 25 MB and printing
+            # the result as the video's transcript would present half a talk
+            # as the whole thing.
+            raise RuntimeError(
+                f"audio is {size // (1024 * 1024)} MB, over the "
+                f"{cap_mb} MB cap — not transcribed rather than truncated"
+            )
+        return path.read_bytes(), _audio_mime(path.suffix)
+    raise RuntimeError(f"audio download produced no file ({last})")
+
+
 def _transcribe(video, workdir):
     blob, mime = _download_audio(video, workdir)
     return _transcriber().transcribe(blob, mime=mime)
@@ -440,16 +567,32 @@ def _transcribe(video, workdir):
 # ---------------------------------------------------------------------------
 # Per-video read
 # ---------------------------------------------------------------------------
+def _finish(video, source, note=None):
+    video["source"] = source
+    if note:
+        video["note"] = note
+    return video
+
+
 def _read_video(video, may_transcribe):
-    """Fill in transcript + source label for one video. Never raises: a broken
-    video degrades to a note so its neighbours keep their evidence."""
+    """Fill in transcript + source label for one video.
+
+    Never raises for per-video problems: a broken video degrades to a note so
+    its neighbours keep their evidence. YouTubeToolMissing is the deliberate
+    exception — a missing tool is a CHANNEL-level failure, not a property of
+    this video, and must reach run_connector so it writes youtube.ERROR.md.
+
+    Sets video["transcribe_attempted"] whenever the paid/expensive path was
+    entered, so the caller can budget ATTEMPTS rather than successes.
+    """
     with tempfile.TemporaryDirectory() as workdir:
         try:
             meta = _fetch_metadata_and_subs(video, workdir)
-        except Exception as exc:  # noqa: BLE001 — degrade, never kill the channel
-            video["source"] = SOURCE_NONE
-            video["note"] = f"could not read this video ({str(exc)[:120]})"
-            return video
+        except YouTubeToolMissing:
+            raise
+        except Exception as exc:  # noqa: BLE001 — degrade, keep the neighbours
+            return _finish(video, SOURCE_NONE,
+                           f"could not read this video ({str(exc)[:120]})")
 
         for field in ("duration", "timestamp", "language", "view_count"):
             if meta.get(field) is not None:
@@ -460,50 +603,85 @@ def _read_video(video, may_transcribe):
             video["channel"] = meta["channel"]
 
         picked = _pick_track(video["id"], workdir, meta)
-        text, kind = "", "auto"
+        text, kind, had_track = "", "auto", False
         if picked:
             path, lang, kind = picked
             text = json3_text(path)
             video["caption_lang"] = lang
+            had_track = bool(text)
         ok, reason = caption_quality(text, video.get("duration"), kind)
         if ok:
             video["transcript"] = text
-            video["source"] = (
-                SOURCE_MANUAL if kind == "manual" else SOURCE_AUTO
+            return _finish(
+                video, SOURCE_MANUAL if kind == "manual" else SOURCE_AUTO
             )
-            return video
 
+        # A video whose captions were READ AND REJECTED is not the same as one
+        # that had none; collapsing them would hide why we spent money.
+        rejected = SOURCE_REJECTED if had_track else SOURCE_NONE
         if not may_transcribe:
-            video["source"] = SOURCE_NONE
-            video["note"] = f"{reason}; transcription budget spent on other videos"
-            return video
+            return _finish(video, rejected,
+                           f"{reason}; transcription budget spent on other videos")
+
         duration = video.get("duration") or 0
         cap = _max_seconds()
-        if duration and duration > cap:
-            video["source"] = SOURCE_NONE
-            video["note"] = (
+        if not duration:
+            # Unknown duration is untrusted, not unlimited: live streams and
+            # broken metadata both land here, and both can download forever.
+            return _finish(video, rejected,
+                           f"{reason}; duration unknown — skipped to bound cost")
+        if duration > cap:
+            return _finish(video, rejected, (
                 f"{reason}; too long to transcribe "
                 f"({duration // 60} min > {cap // 60} min cap)"
-            )
-            return video
+            ))
+
+        video["transcribe_attempted"] = True
         try:
             transcribed = _transcribe(video, workdir)
         except Exception as exc:  # noqa: BLE001 — honest note, not a crash
-            video["source"] = SOURCE_NONE
-            video["note"] = f"{reason}; transcription failed ({str(exc)[:120]})"
-            return video
+            return _finish(video, rejected,
+                           f"{reason}; transcription failed ({str(exc)[:120]})")
         if not transcribed:
-            video["source"] = SOURCE_NONE
-            video["note"] = f"{reason}; transcription returned nothing"
-            return video
+            return _finish(video, rejected,
+                           f"{reason}; transcription returned nothing")
         video["transcript"] = transcribed
-        video["source"] = SOURCE_WHISPER
-        video["note"] = f"captions rejected: {reason}"
-        return video
+        return _finish(video, SOURCE_WHISPER, f"captions rejected: {reason}")
 
 
-def _needs_transcription(video):
+def _was_transcribed(video):
     return video.get("source") == SOURCE_WHISPER
+
+
+def _save_transcripts(out_path, videos):
+    """Persist full transcripts beside the report.
+
+    The markdown carries an excerpt; a reader auditing a quote past that point
+    needs the whole text, and for a transcript WE produced this run directory
+    is the only place it exists. Returns {video_id: relative path}.
+    """
+    saved = {}
+    holders = [v for v in videos if v.get("transcript")]
+    if not holders:
+        return saved
+    folder = Path(out_path).parent / TRANSCRIPT_DIR_NAME
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return saved
+    for video in holders:
+        name = f"{video['id']}.txt"
+        try:
+            (folder / name).write_text(
+                f"# {video['title']}\n# {video['url']}\n"
+                f"# source: {video.get('source', '?')}\n\n"
+                f"{video['transcript']}\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            continue
+        saved[video["id"]] = f"{TRANSCRIPT_DIR_NAME}/{name}"
+    return saved
 
 
 # ---------------------------------------------------------------------------
@@ -517,10 +695,19 @@ def channel_youtube(query, out_path, max_items, freshness_sink=None,
     `evidence_sink` (additive, like freshness_sink) receives a marker for each
     video WE transcribed — that is what lets coverage-receipts say truthfully
     that no web index holds this text.
+
+    Returns the number of videos that actually carry a transcript. Counting
+    listed rows instead would let a run with zero readable videos claim it had
+    the spoken content a web index lacks.
     """
+    # Probe the tool ONCE, before either discovery path. The explicit-URL path
+    # never calls _search, so without this a missing yt-dlp would degrade
+    # per-video and report a healthy channel instead of youtube.ERROR.md.
+    _yt_dlp_argv()
+
     explicit = _explicit_ids(query)
     if explicit:
-        videos = [
+        shown = [
             {
                 "id": video_id,
                 "title": video_id,
@@ -533,35 +720,46 @@ def channel_youtube(query, out_path, max_items, freshness_sink=None,
                 "text": query,
             }
             for video_id in explicit
-        ]
+        ][:max_items]
         ranked_note = None
-        shown = videos[:max_items]
     else:
         pool = min(25, max(10, max_items * 2))
-        found = _search(query, pool)
         ranked = runner("rank_items")(
-            found, query, text_key="text", engagement_key="views",
-            max_items=max_items,
+            _search(query, pool), query, text_key="text",
+            engagement_key="views", max_items=max_items,
         )
         ranked_note = ranked.note
         shown = ranked.items
 
+    route, route_reason = transcribe_route()
     read_limit = min(len(shown), _read_top())
-    transcribe_budget = _transcribe_top()
-    transcribed = 0
+    transcribe_budget = _transcribe_top() if route else 0
+    deadline = time.monotonic() + _deadline_seconds()
+    attempts = 0
+    out_of_time = False
+
     for index, video in enumerate(shown):
         if index >= read_limit:
-            video["source"] = SOURCE_NONE
-            video["note"] = (
-                f"not read — only the top {read_limit} videos are opened per run"
-            )
+            _finish(video, SOURCE_NONE,
+                    f"not read — only the top {read_limit} videos are opened per run")
             continue
-        _read_video(video, may_transcribe=transcribed < transcribe_budget)
-        if _needs_transcription(video):
-            transcribed += 1
-            if evidence_sink is not None:
-                evidence_sink.append(f"self-transcribed:{video['id']}")
+        if time.monotonic() >= deadline:
+            out_of_time = True
+            _finish(video, SOURCE_NONE,
+                    "not read — the channel hit its wall-clock budget")
+            continue
+        _read_video(video, may_transcribe=attempts < transcribe_budget)
+        if video.get("transcribe_attempted"):
+            # Budget ATTEMPTS, not successes: three failures in a row are three
+            # downloads and three vendor calls already paid for.
+            attempts += 1
+        if _was_transcribed(video) and evidence_sink is not None:
+            evidence_sink.append(f"self-transcribed:{video['id']}")
         runner("_note_ts")(freshness_sink, video.get("timestamp"))
+
+    transcribed = sum(1 for v in shown if _was_transcribed(v))
+    with_text = sum(1 for v in shown if v.get("transcript"))
+    saved = _save_transcripts(out_path, shown)
 
     lines = [f"# YouTube — what was actually said about: {query}\n"]
     if ranked_note:
@@ -572,10 +770,30 @@ def channel_youtube(query, out_path, max_items, freshness_sink=None,
             f"_Read the top {read_limit} of {len(shown)} matches; the rest are "
             "listed with metadata only._\n"
         )
+    if out_of_time:
+        lines.append(
+            "_The channel hit its wall-clock budget; the videos marked below "
+            "were never opened._\n"
+        )
     if transcribed:
+        # Name the route: "we transcribed this" costs either money or nothing
+        # at all depending on it, and an auditor needs to know which.
+        cost = ("run locally at $0 — the audio never left this machine"
+                if route == "local"
+                else f"run via {route}, billed to your key")
         lines.append(
             f"_Transcribed {transcribed} video(s) ourselves because YouTube's "
-            "captions were unusable — that text exists in no web index._\n"
+            f"captions were unusable ({cost}). That text exists in no web "
+            "index._\n"
+        )
+    elif not route:
+        lines.append(
+            f"_No transcription route configured ({route_reason}), so videos "
+            "with unusable captions are listed as metadata only._\n"
+        )
+    if saved:
+        lines.append(
+            f"_Full transcripts saved beside this report in `{TRANSCRIPT_DIR_NAME}/`._\n"
         )
     if not shown:
         lines.append("_No videos matched this topic._\n")
@@ -594,5 +812,7 @@ def channel_youtube(query, out_path, max_items, freshness_sink=None,
             lines.append(f"  - _{video['note']}_")
         if video.get("transcript"):
             lines.append(f"  - transcript: {_excerpt(video['transcript'], 600)}")
+            if saved.get(video["id"]):
+                lines.append(f"  - full text: {saved[video['id']]}")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return len(shown)
+    return with_text

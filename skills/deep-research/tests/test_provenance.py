@@ -95,25 +95,46 @@ class ReachabilityTableTest(unittest.TestCase):
         # exists in no index. This is a fact about the run, not a heuristic.
         for source in ("youtube", "github", "hackernews"):
             tag, reason = provenance.web_index_reachable(
-                source, 500, self_sourced=True
+                source, 500, self_sourced=True,
+                self_sourced_items=2, items=2,
             )
             self.assertEqual(tag, "no", f"{source} self-sourced must be 'no'")
             self.assertIn("no web index", reason)
 
     def test_self_sourced_outranks_the_static_table(self):
         plain, _ = provenance.web_index_reachable("youtube", 500)
-        owned, _ = provenance.web_index_reachable("youtube", 500,
-                                                  self_sourced=True)
+        owned, _ = provenance.web_index_reachable(
+            "youtube", 500, self_sourced=True, self_sourced_items=1, items=1
+        )
         self.assertEqual(plain, "partial")
         self.assertEqual(owned, "no")
 
+    def test_partial_self_sourcing_never_claims_the_whole_source(self):
+        tag, reason = provenance.web_index_reachable(
+            "youtube", 500, self_sourced=True, self_sourced_items=2, items=7
+        )
+        self.assertEqual(tag, "partial")
+        self.assertIn("2 of 7", reason)
+
 
 class SelfSourcedRecordTests(unittest.TestCase):
-    def test_record_carries_the_self_sourced_downgrade(self):
+    def test_full_coverage_earns_the_flat_unreachable_claim(self):
         record = provenance.provenance_record(
-            "youtube", "context engineering", 3, self_sourced=True
+            "youtube", "context engineering", 3,
+            self_sourced=True, self_sourced_items=3,
         )
         self.assertEqual(record["web_index_reachable"], "no")
+
+    def test_partial_coverage_states_the_real_ratio(self):
+        """One self-produced transcript among five results must not relabel
+        the four rows a web index can read perfectly well."""
+        record = provenance.provenance_record(
+            "youtube", "context engineering", 5,
+            self_sourced=True, self_sourced_items=1,
+        )
+        self.assertEqual(record["web_index_reachable"], "partial")
+        self.assertIn("1 of 5", record["reason"])
+        self.assertIn("own transcription", record["reason"])
 
     def test_default_record_makes_no_self_sourced_claim(self):
         record = provenance.provenance_record("youtube", "q", 3)

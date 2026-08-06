@@ -1353,7 +1353,10 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
                 max(0.0, (time.time() - max(freshness_sink)) / 3600.0), 1
             )
         if evidence_sink:
+            # The COUNT, not just a flag: one self-produced transcript among
+            # five results must not relabel the four a web index can read.
             record["self_sourced"] = True
+            record["self_sourced_items"] = len(evidence_sink)
         with lock:
             manifest["channels"][conn.name] = record
         if announce:
@@ -1784,6 +1787,7 @@ def run_fire_cli(args, topic, launch_cwd, ap):
     prov = _import_sibling("provenance").provenance_record(
         source, topic, items, newest_item_age_hours=age,
         self_sourced=record.get("self_sourced", False),
+        self_sourced_items=record.get("self_sourced_items", 0),
     )
     provenance_rows.append(prov)
 
@@ -2152,6 +2156,9 @@ def main():
             self_sourced=(
                 manifest["channels"].get(c.name) or {}
             ).get("self_sourced", False),
+            self_sourced_items=(
+                manifest["channels"].get(c.name) or {}
+            ).get("self_sourced_items", 0),
         )
         for c in live
     ]

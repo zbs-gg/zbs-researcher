@@ -53,20 +53,26 @@ Verify from the registry rather than trusting the upload:
 npm view @zbs-gg/zbs-researcher version maintainers
 ```
 
-## The old unscoped package
+## The old unscoped package (already handled)
 
-`zbs-researcher@0.1.0` was published on 2026-07-21 from the personal account.
-It is superseded, not deleted — point people at the new name:
+`zbs-researcher@0.1.0`, published 2026-07-21 from the personal account, was
+**unpublished on 2026-08-06**. Nothing further to do — this section is the
+record of what happened and what it costs.
+
+Unpublishing is not reversible in the way deprecation is: `0.1.0` can never be
+republished under that name, and anyone still running
+`npx -y zbs-researcher@latest` now gets a resolution error rather than a
+deprecation warning pointing at the new package. That was the accepted
+trade for removing it outright.
+
+If a future release ever needs to retire a name without burning it, prefer:
 
 ```bash
-npm deprecate zbs-researcher "Moved to @zbs-gg/zbs-researcher — npx -y @zbs-gg/zbs-researcher@latest"
+npm deprecate <name> "Moved to @zbs-gg/zbs-researcher — npx -y @zbs-gg/zbs-researcher@latest"
 ```
 
-Why not `npm unpublish`: the free 72-hour unpublish window closed on
-2026-07-24, and unpublishing burns that version number permanently — `0.1.0`
-could never be republished under that name. Deprecation shows a warning on
-every install, is reversible (`npm deprecate <pkg> ""` clears it), and keeps
-anyone who already depends on the old name working.
+which warns on every install, keeps existing dependents working, and clears
+with `npm deprecate <name> ""`.
 
 ## Version agreement
 

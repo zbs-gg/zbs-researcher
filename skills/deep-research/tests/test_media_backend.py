@@ -319,18 +319,38 @@ class TranscribeRouteTests(unittest.TestCase):
         self.assertEqual(route, "openrouter")
         self.assertIn("DEEP_RESEARCH_TRANSCRIBE_BACKEND", reason)
 
-    def test_unknown_forced_route_warns_and_is_ignored(self):
-        stderr = io.StringIO()
-        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(
-            stderr
-        ):
-            route, _ = self.route(
+    def test_unknown_forced_route_fails_closed_instead_of_picking_another(self):
+        """An unrecognized explicit route must NOT fall through to derivation:
+        answering a typo'd request for local, private transcription by
+        uploading the audio to whichever cloud key is configured is the exact
+        outcome the person was trying to avoid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            route, reason = self.route(
                 tmp,
                 DEEP_RESEARCH_TRANSCRIBE_BACKEND="mainframe",
                 GROQ_API_KEY=GROQ_KEY,
             )
-        self.assertEqual(route, "groq")
-        self.assertIn("mainframe", stderr.getvalue())
+        self.assertIsNone(route)
+        self.assertIn("mainframe", reason)
+
+    def test_self_is_accepted_as_the_local_route(self):
+        """The vision profile spells local as DEEP_RESEARCH_PROFILE=self, so
+        anyone setting the audio route by analogy writes 'self'. Treating that
+        as unknown would ship their audio to a vendor."""
+        with tempfile.TemporaryDirectory() as tmp:
+            route, _ = self.route(
+                tmp,
+                DEEP_RESEARCH_TRANSCRIBE_BACKEND="self",
+                GROQ_API_KEY=GROQ_KEY,
+            )
+        self.assertEqual(route, "local")
+
+    def test_route_aliases_are_case_insensitive(self):
+        for value, expected in (("LOCAL", "local"), ("Self", "local"),
+                                ("mlx", "local"), ("client", "groq")):
+            with self.subTest(value=value):
+                self.assertEqual(media_backend.normalize_route(value), expected)
+        self.assertIsNone(media_backend.normalize_route("carrier-pigeon"))
 
     def test_onboarding_answer_is_honored(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -415,7 +435,9 @@ class OpenRouterTranscribeTests(unittest.TestCase):
         )
         self.assertEqual(headers["Authorization"], f"Bearer {ROUTER_KEY}")
         body = json.loads(data.decode("utf-8"))
-        self.assertEqual(body["model"], media_backend.OPENROUTER_TRANSCRIBE_MODEL)
+        self.assertEqual(
+            body["model"], media_backend.DEFAULT_OPENROUTER_TRANSCRIBE_MODEL
+        )
         self.assertEqual(
             body["input_audio"]["data"],
             base64.b64encode(AUDIO).decode("ascii"),

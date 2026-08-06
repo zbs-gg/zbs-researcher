@@ -336,7 +336,8 @@ class HardwareProbeTests(unittest.TestCase):
     MEDIA_KEYS = {"mlx_whisper", "yt_dlp", "transcribe_route", "recommendation"}
 
     def test_hardware_profile_has_the_documented_shape(self):
-        hardware = detect_state.hardware_profile()
+        with tempfile.TemporaryDirectory() as tmp, isolated_environment(tmp):
+            hardware = detect_state.hardware_profile()
         self.assertEqual(set(hardware), self.HARDWARE_KEYS)
         self.assertIsInstance(hardware["apple_silicon"], bool)
         for field in ("ram_gb", "cpu_count"):
@@ -345,7 +346,10 @@ class HardwareProbeTests(unittest.TestCase):
             )
 
     def test_local_media_state_has_the_documented_shape(self):
-        media = detect_state.local_media_state()
+        # Isolated: unisolated, this reads the developer's real secrets dir and
+        # resolves a route from whatever keys they happen to have exported.
+        with tempfile.TemporaryDirectory() as tmp, isolated_environment(tmp):
+            media = detect_state.local_media_state()
         self.assertEqual(set(media), self.MEDIA_KEYS)
         self.assertIsInstance(media["mlx_whisper"], bool)
         self.assertIsInstance(media["yt_dlp"], bool)
@@ -392,7 +396,8 @@ class HardwareProbeTests(unittest.TestCase):
 
     def test_degrade_shape_carries_hardware_so_the_wizard_stays_informed(self):
         """A broken key file must not also blind the wizard to the machine."""
-        state = detect_state._absent_state()
+        with tempfile.TemporaryDirectory() as tmp, isolated_environment(tmp):
+            state = detect_state._absent_state()
         self.assertEqual(set(state["hardware"]), self.HARDWARE_KEYS)
         self.assertEqual(set(state["local_media"]), self.MEDIA_KEYS)
 

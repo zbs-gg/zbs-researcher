@@ -70,7 +70,7 @@ docs/assets/persona-hello.png and uncomment:
 
 ## Tiers at a glance
 
-- **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket,
+- **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket, YouTube *(needs `yt-dlp`)*,
   GitHub, github-issues, Reddit, Bluesky, launch-radar, revenue-radar.
 - **Tier 1 — your own keys**: LLM lenses Gemini / Grok / Perplexity.
 - **Tier 2 — one OpenRouter key**: all three default LLM lenses at once.

@@ -39,7 +39,7 @@ bash scripts/selftest.sh                                # 10-step smoke, does no
 ## Hard rules
 
 - **Budget invariant (R17):** the default run does not hit the Anthropic/OpenAI API; OpenAI is opt-in only. Paid calls (OpenRouter, vendors) never happen in tests, and at runtime only when keys are explicitly configured.
-- **Stdlib-only** (urllib, threading). Telethon/MLX are lazy optional imports only.
+- **Stdlib-only** (urllib, threading). Telethon/MLX are lazy optional imports only; `yt-dlp` is an optional external tool the youtube channel degrades without.
 - **Windows-safe (R18):** no `signal.SIGALRM`, `os.killpg`, `fcntl`, `pty`, `os.fork`; threading only. Selftest greps for this.
 - **Secrets:** keys come via `DEEP_RESEARCH_SECRETS_DIR` (default `~/.config/zbs-researcher/secrets`) or env; no key material in outputs, logs, or error messages.
 - **SKILL.md selftest contract:** the first occurrences of the markers `## STEP 0 — RESEARCH PLAN` → `--allocate-run` → `research-plan.md` → `--output-dir "$RUN_DIR"` → `synthesis.md` must appear in this order; and the investigate markers `INVESTIGATE MODE` → `NEVER fire a blanket` → `--fire` → `--coverage` → `--feedback` in that order; the literal `${CLAUDE_PLUGIN_ROOT}` is forbidden in SKILL.md (but required in `hooks/hooks.json`). Positioning markers `not the pitch — quality is` (SKILL + README) and `saved locally to inform the next run` (SKILL) must stay present.

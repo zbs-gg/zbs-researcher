@@ -113,9 +113,15 @@ def _chip_name(system):
     real, and it is what makes the wizard's offer concrete ("M4 Max, 64 GB")."""
     if system != "darwin":
         return None
+    # Absolute path, not a PATH lookup: this runs in a SessionStart hook on
+    # every session, so a "sysctl" earlier in someone's PATH would execute on
+    # every start. The chip name is a nicety; refusing to hunt for it is free.
+    sysctl = "/usr/sbin/sysctl"
+    if not os.path.exists(sysctl):
+        return None
     try:
         completed = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            [sysctl, "-n", "machdep.cpu.brand_string"],
             capture_output=True, timeout=2, check=False,
         )
     except (OSError, subprocess.SubprocessError):

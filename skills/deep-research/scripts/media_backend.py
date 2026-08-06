@@ -64,19 +64,24 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import urllib.request
 import uuid
 from pathlib import Path
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-GROQ_WHISPER_MODEL = os.environ.get(
-    "DEEP_RESEARCH_WHISPER_MODEL", "whisper-large-v3-turbo"
-)
+DEFAULT_GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
 # OpenRouter's transcription endpoint (shipped 2026-07-22). Same key that
 # already covers the Tier-2 LLM lenses, so one credential now buys audio too.
 OPENROUTER_TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
-OPENROUTER_TRANSCRIBE_MODEL = os.environ.get(
-    "DEEP_RESEARCH_TRANSCRIBE_MODEL", "openai/whisper-large-v3"
+DEFAULT_OPENROUTER_TRANSCRIBE_MODEL = "openai/whisper-large-v3"
+# mlx_whisper's own default is whisper-TINY. Leaving the model unset would
+# quietly give the local route a far weaker model than the docs promise (and
+# than the wizard's RAM thresholds assume), so pin it here.
+DEFAULT_SELF_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+# Ceiling for the in-process local transcription call (see _run_bounded).
+LOCAL_TRANSCRIBE_TIMEOUT = int(
+    os.environ.get("DEEP_RESEARCH_LOCAL_TRANSCRIBE_TIMEOUT", "") or 900
 )
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 GEMINI_VISION_MODEL = os.environ.get(
@@ -200,6 +205,44 @@ def _audio_format(mime):
     return _audio_filename(mime).rsplit(".", 1)[-1]
 
 
+def _model(env_var, default):
+    """Model id read at CALL time — same discipline as key resolution, so a
+    setting exported after this module was imported still takes effect."""
+    return os.environ.get(env_var, "").strip() or default
+
+
+def _run_bounded(call, timeout, label):
+    """Run a blocking local call with a deadline.
+
+    Cloud routes get their timeout from urllib; the local route is an
+    in-process library call that can wedge on a model download or a pathological
+    input and would otherwise hang a whole research run with no ceiling. A
+    daemon thread is the Windows-safe watchdog (R18 rules out signal-based
+    timeouts). The worker cannot be killed, but it stops holding the run: it is
+    a daemon, so it never blocks interpreter exit.
+    """
+    box = {}
+
+    def target():
+        try:
+            box["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise MediaBackendError(
+            f"{label} exceeded {timeout}s and was abandoned — try a smaller "
+            "model via DEEP_RESEARCH_SELF_WHISPER_MODEL, raise "
+            "DEEP_RESEARCH_LOCAL_TRANSCRIBE_TIMEOUT, or use a cloud route."
+        )
+    if "error" in box:
+        raise box["error"]
+    return box.get("value") or {}
+
+
 class ClientBackend:
     """Cloud-cheap profile: Groq Whisper for audio, Gemini Flash for vision.
     Raw urllib HTTP; keys resolved at call time; NO OpenAI/Anthropic (R17)."""
@@ -213,7 +256,12 @@ class ClientBackend:
             "has a generous free tier).",
         )
         body, content_type = _multipart(
-            {"model": GROQ_WHISPER_MODEL, "response_format": "json"},
+            {
+                "model": _model(
+                    "DEEP_RESEARCH_WHISPER_MODEL", DEFAULT_GROQ_WHISPER_MODEL
+                ),
+                "response_format": "json",
+            },
             _audio_filename(mime), audio_bytes, mime or "application/octet-stream",
         )
         data = _http_post_raw(
@@ -275,10 +323,21 @@ class SelfBackend:
                 "(Apple silicon): pip install mlx-whisper — or use the "
                 "default client profile (Groq) instead."
             ) from None
+        model = _model(
+            "DEEP_RESEARCH_SELF_WHISPER_MODEL", DEFAULT_SELF_WHISPER_MODEL
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / _audio_filename(mime)
             path.write_bytes(audio_bytes)
-            result = mlx_whisper.transcribe(str(path))
+            # The model is passed EXPLICITLY: mlx_whisper's own default is
+            # whisper-tiny, so omitting it would quietly deliver a far weaker
+            # transcript than the docs promise and than the wizard's RAM
+            # thresholds are sized for.
+            result = _run_bounded(
+                lambda: mlx_whisper.transcribe(str(path), path_or_hf_repo=model),
+                LOCAL_TRANSCRIBE_TIMEOUT,
+                f"local transcription with {model}",
+            )
         return (result.get("text") or "").strip()
 
     def describe_image(self, image_bytes, mime="image/jpeg"):
@@ -325,7 +384,10 @@ class OpenRouterBackend:
             "gemini/grok/perplexity lenses.",
         )
         payload = {
-            "model": OPENROUTER_TRANSCRIBE_MODEL,
+            "model": _model(
+                "DEEP_RESEARCH_TRANSCRIBE_MODEL",
+                DEFAULT_OPENROUTER_TRANSCRIBE_MODEL,
+            ),
             "input_audio": {
                 "data": base64.b64encode(audio_bytes).decode("ascii"),
                 "format": _audio_format(mime),
@@ -379,6 +441,27 @@ class UnconfiguredTranscriber:
         )
 
 
+# Synonyms people actually type. "self" is the important one: the vision
+# profile already spells local as DEEP_RESEARCH_PROFILE=self, so anyone
+# setting the audio route by analogy writes "self" — and a route name that
+# silently means "not local" would ship their audio to a vendor.
+_ROUTE_ALIASES = {
+    "self": "local",
+    "mlx": "local",
+    "offline": "local",
+    "client": "groq",
+    "whisper": "local",
+}
+
+
+def normalize_route(value):
+    """Canonical route name for a user-supplied string, or None if unknown."""
+    candidate = (value or "").strip().lower()
+    if candidate in TRANSCRIBE_ROUTES:
+        return candidate
+    return _ROUTE_ALIASES.get(candidate)
+
+
 def _stored_transcribe_route():
     """The wizard's answer from <secrets-dir>/onboarding.json, or None.
     Tolerant by design: a missing, unreadable, or malformed marker simply
@@ -391,8 +474,7 @@ def _stored_transcribe_route():
         return None
     if not isinstance(data, dict):
         return None
-    choice = data.get("transcribe")
-    return choice if choice in TRANSCRIBE_ROUTES else None
+    return normalize_route(data.get("transcribe"))
 
 
 def resolve_transcribe_route(profile=None):
@@ -404,12 +486,16 @@ def resolve_transcribe_route(profile=None):
     """
     forced = os.environ.get(TRANSCRIBE_ROUTE_ENV_VAR, "").strip()
     if forced:
-        if forced in TRANSCRIBE_ROUTES:
-            return forced, f"forced by {TRANSCRIBE_ROUTE_ENV_VAR}"
-        print(
-            f"[media-backend] unknown {TRANSCRIBE_ROUTE_ENV_VAR}={forced!r} — "
-            "ignoring (known: " + ", ".join(TRANSCRIBE_ROUTES) + ")",
-            file=sys.stderr,
+        route = normalize_route(forced)
+        if route:
+            return route, f"forced by {TRANSCRIBE_ROUTE_ENV_VAR}"
+        # FAIL CLOSED. Falling through to derivation here would answer a
+        # typo'd request for local, private transcription by uploading the
+        # audio to whichever cloud key happens to be configured — the exact
+        # outcome the person was trying to avoid.
+        return None, (
+            f"{TRANSCRIBE_ROUTE_ENV_VAR}={forced!r} is not a known route "
+            "(" + ", ".join(TRANSCRIBE_ROUTES) + ")"
         )
     stored = _stored_transcribe_route()
     if stored:

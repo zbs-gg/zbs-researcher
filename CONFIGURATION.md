@@ -77,13 +77,23 @@ the error then says exactly what to fix, instead of quietly billing someone
 else. `python3 scripts/deep-research.py --diagnose` prints the machine and the
 route that will actually run.
 
+An explicitly chosen route that is not recognized **fails closed** rather
+than falling through to another provider — answering a typo'd request for
+local transcription by uploading the audio would defeat the point. `self`,
+`mlx` and `offline` are accepted spellings of `local`.
+
 Related env vars: `DEEP_RESEARCH_TRANSCRIBE_MODEL` (OpenRouter model id,
 default `openai/whisper-large-v3`), `DEEP_RESEARCH_WHISPER_MODEL` (Groq model
-id), `DEEP_RESEARCH_YOUTUBE_READ_TOP` (videos opened per run, default 5),
-`DEEP_RESEARCH_YOUTUBE_TRANSCRIBE_TOP` (videos transcribed per run, default
-3), `DEEP_RESEARCH_YOUTUBE_MAX_SECONDS` (skip longer videos, default 2700),
-`DEEP_RESEARCH_YOUTUBE_SUB_LANGS` (caption languages to try, default
-`en-orig,en`).
+id), `DEEP_RESEARCH_SELF_WHISPER_MODEL` (local model, default
+`mlx-community/whisper-large-v3-turbo` — pinned deliberately, because
+mlx-whisper's own default is the much weaker whisper-tiny),
+`DEEP_RESEARCH_LOCAL_TRANSCRIBE_TIMEOUT` (ceiling for one local pass,
+default 900s), `DEEP_RESEARCH_YOUTUBE_READ_TOP` (videos opened per run,
+default 5), `DEEP_RESEARCH_YOUTUBE_TRANSCRIBE_TOP` (videos transcribed per
+run, default 3), `DEEP_RESEARCH_YOUTUBE_MAX_SECONDS` (skip longer videos,
+default 2700), `DEEP_RESEARCH_YOUTUBE_DEADLINE` (wall-clock budget for the
+whole channel, default 480s), `DEEP_RESEARCH_YOUTUBE_SUB_LANGS` (caption
+languages to try, default `en-orig,en`).
 
 ## Key files instead of env vars
 
@@ -247,12 +257,17 @@ Non-connector components:
   `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
   baseline row reads "unavailable", the run side still scores, and no
   network I/O happens.
-- **Media backend** (`media_backend.py`, used by tiktok-ig): in the default
-  `client` profile, audio bytes go to `api.groq.com` (Groq Whisper — Groq's
-  own OpenAI-*compatible* route, not OpenAI) and image bytes to
-  `generativelanguage.googleapis.com` (Gemini vision).
-  `DEEP_RESEARCH_PROFILE=self` runs local MLX models instead — nothing
-  leaves the machine.
+- **Media backend** (`media_backend.py`, used by **youtube and tiktok-ig**):
+  where audio bytes go depends on the resolved transcription route —
+  `api.groq.com` (Groq Whisper — Groq's own OpenAI-*compatible* route, not
+  OpenAI), `openrouter.ai/api/v1/audio/transcriptions` (OpenRouter), or
+  nowhere at all on the `local` route, which runs MLX Whisper on this machine.
+  Image bytes go to `generativelanguage.googleapis.com` (Gemini vision), or
+  stay local under `DEEP_RESEARCH_PROFILE=self`. Only the audio itself and a
+  model id are uploaded — never the research query, and never a key in a URL.
+  **The route is derived from configured keys**, so a key you added for the
+  LLM lenses can also pay for transcription; the report names the route it
+  used, and `--diagnose` shows it before you run.
 - **Telegram session storage**: the Telethon `*.session` file lives **only**
   in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR` or `~/.config/zbs-researcher/secrets`,
   chmod 0600 on POSIX) — never in the project or research output tree. The

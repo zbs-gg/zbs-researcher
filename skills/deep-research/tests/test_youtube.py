@@ -14,6 +14,7 @@ touches the network, never spawns a process, and never spends a cent.
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,20 +95,28 @@ class FakeYtDlp:
         self.audio_code = audio_code
         self.calls = []
 
+    @staticmethod
+    def video_id_of(args):
+        """The id yt-dlp was actually asked about — taken from the trailing URL
+        so caption files land under the right name for EACH video, not a single
+        module-level constant."""
+        match = re.search(r"[?/]v?=?([A-Za-z0-9_-]{11})$", args[-1])
+        return match.group(1) if match else VIDEO_ID
+
     def __call__(self, args, timeout):
         args = list(args)
         self.calls.append(args)
-        joined = " ".join(args)
         if any(a.startswith("ytsearch") for a in args):
             return self.search_code, "\n".join(self.search_lines), ""
         if "--write-subs" in args:
             outdir = Path(args[args.index("-o") + 1]).parent
+            video_id = self.video_id_of(args)
             for suffix, payload in self.subs.items():
-                (outdir / f"{VIDEO_ID}.{suffix}.json3").write_text(
+                (outdir / f"{video_id}.{suffix}.json3").write_text(
                     json.dumps(payload), encoding="utf-8"
                 )
             return self.meta_code, json.dumps(self.meta), ""
-        if "bestaudio[ext=m4a]/bestaudio" in joined:
+        if "-f" in args:
             if self.audio is not None:
                 outdir = Path(args[args.index("-o") + 1]).parent
                 (outdir / "audio.m4a").write_bytes(self.audio)
@@ -134,21 +143,34 @@ class YouTubeCase(unittest.TestCase):
         env = mock.patch.dict(os.environ)
         env.start()
         self.addCleanup(env.stop)
+        # EVERY budget knob the connector reads, or a developer's own shell
+        # silently changes which branch these tests exercise.
         for name in (
             "DEEP_RESEARCH_YOUTUBE_READ_TOP",
             "DEEP_RESEARCH_YOUTUBE_TRANSCRIBE_TOP",
             "DEEP_RESEARCH_YOUTUBE_MAX_SECONDS",
+            "DEEP_RESEARCH_YOUTUBE_DEADLINE",
+            "DEEP_RESEARCH_YOUTUBE_SUB_LANGS",
         ):
             os.environ.pop(name, None)
 
     def run_channel(self, fake, transcriber=None, topic=TOPIC, max_items=10,
-                    freshness_sink=None, evidence_sink=None):
+                    freshness_sink=None, evidence_sink=None,
+                    route=("groq", "test route"), out_dir=None):
+        """Drive the channel with every external seam pinned.
+
+        The ROUTE is pinned too: leaving it to media_backend would make these
+        tests read whichever keys the developer or CI happens to have exported,
+        so the same suite would exercise a different code path per machine.
+        """
         transcriber = transcriber or FakeTranscriber()
         with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "youtube.md"
+            out = Path(out_dir or tmp) / "youtube.md"
             with mock.patch.object(youtube_mod, "_run_yt_dlp", fake), \
                     mock.patch.object(
                         youtube_mod, "_transcriber", lambda: transcriber
+                    ), mock.patch.object(
+                        youtube_mod, "transcribe_route", lambda: route
                     ):
                 count = youtube_mod.channel_youtube(
                     topic, out, max_items,
@@ -296,24 +318,28 @@ class QualityGateTests(YouTubeCase):
 
 
 class TrackPreferenceTests(YouTubeCase):
-    def pick(self, langs, manual=()):
+    def pick(self, langs, manual=(), spoken=None, auto=()):
         with tempfile.TemporaryDirectory() as tmp:
             for lang in langs:
                 (Path(tmp) / f"{VIDEO_ID}.{lang}.json3").write_text("{}", "utf-8")
             meta = {"subtitles": {lang: [{}] for lang in manual}}
+            if spoken:
+                meta["language"] = spoken
+            if auto:
+                meta["automatic_captions"] = {lang: [{}] for lang in auto}
             picked = youtube_mod._pick_track(VIDEO_ID, tmp, meta)
         return None if picked is None else (picked[1], picked[2])
 
     def test_human_captions_beat_every_machine_track(self):
         self.assertEqual(
-            self.pick(["en", "en-orig", "ru-en"], manual=["en"]), ("en", "manual")
+            self.pick(["en", "en-orig", "ru-en"], manual=["en"], spoken="en"),
+            ("en", "manual"),
         )
 
-    def test_original_language_auto_beats_plain_and_translated(self):
-        self.assertEqual(self.pick(["en-orig", "ru-en"]), ("en-orig", "auto"))
-
-    def test_translation_is_the_last_resort(self):
-        self.assertEqual(self.pick(["ru-en"]), ("ru-en", "translated"))
+    def test_original_language_auto_beats_plain(self):
+        self.assertEqual(
+            self.pick(["en-orig", "en"], spoken="en"), ("en-orig", "auto")
+        )
 
     def test_no_track_returns_none(self):
         self.assertIsNone(self.pick([]))
@@ -321,8 +347,51 @@ class TrackPreferenceTests(YouTubeCase):
     def test_provenance_comes_from_metadata_not_the_filename(self):
         """The same "en" file is human-made or machine-made depending ONLY on
         whether the metadata lists it under `subtitles`."""
-        self.assertEqual(self.pick(["en"], manual=["en"])[1], "manual")
-        self.assertEqual(self.pick(["en"])[1], "auto")
+        self.assertEqual(self.pick(["en"], manual=["en"], spoken="en")[1], "manual")
+        self.assertEqual(self.pick(["en"], spoken="en")[1], "auto")
+
+
+class TranslationDetectionTests(YouTubeCase):
+    """A machine translation of a machine transcript is the worst tier, and
+    YouTube does NOT mark it in the language code — so the only reliable test
+    is the track's language against the language actually spoken."""
+
+    def classify(self, lang, manual=(), spoken=None):
+        return youtube_mod._classify_track(lang, set(manual), spoken)[0]
+
+    def test_bare_code_translation_of_a_russian_video_is_caught(self):
+        # The regression: YouTube serves the translated auto-caption for a
+        # Russian video under a plain "en". A dash-based rule calls this an
+        # ordinary auto-caption and the report then quotes a translation as if
+        # it were what the speaker said.
+        self.assertEqual(self.classify("en", spoken="ru"), "translated")
+
+    def test_regional_and_script_subtags_are_not_translations(self):
+        for lang, spoken in (("pt-BR", "pt"), ("zh-Hans", "zh"),
+                             ("en-GB", "en"), ("es-419", "es")):
+            with self.subTest(lang=lang):
+                self.assertEqual(self.classify(lang, spoken=spoken), "auto")
+
+    def test_original_language_track_is_never_a_translation(self):
+        self.assertEqual(self.classify("ru-orig", spoken="ru"), "auto")
+
+    def test_unknown_spoken_language_never_condemns_a_track(self):
+        # Over-claiming "translated" would push a perfectly good track into
+        # paid transcription; with no spoken language known, stay neutral.
+        self.assertEqual(self.classify("ru-en", spoken=None), "auto")
+
+    def test_manual_track_outranks_a_language_mismatch(self):
+        self.assertEqual(
+            self.classify("en", manual=["en"], spoken="ru"), "manual"
+        )
+
+    def test_spoken_language_falls_back_to_the_orig_caption_key(self):
+        self.assertEqual(
+            youtube_mod._spoken_language(
+                {"automatic_captions": {"ru-orig": [{}], "en": [{}]}}
+            ),
+            "ru",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +442,10 @@ class TranscriptionFallbackTests(YouTubeCase):
         )
         transcriber = FakeTranscriber(error=RuntimeError("no route configured"))
         count, report, _ = self.run_channel(fake, transcriber=transcriber)
-        self.assertEqual(count, 1)
+        # No transcript was obtained, so the channel reports zero EVIDENCE even
+        # though the video is still listed with its metadata.
+        self.assertEqual(count, 0)
+        self.assertIn("context engineering explained", report)
         self.assertIn("transcription failed", report)
         self.assertIn("no route configured", report)
         self.assertIn(youtube_mod.SOURCE_NONE, report)
@@ -385,8 +457,11 @@ class TranscriptionFallbackTests(YouTubeCase):
             subs={}, audio=None, audio_code=1,
         )
         count, report, _ = self.run_channel(fake)
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 0)
         self.assertIn("transcription failed", report)
+        # The video is still listed with its metadata — a download failure
+        # loses the transcript, not the row.
+        self.assertIn("context engineering explained", report)
 
 
     def test_unreadable_video_does_not_kill_its_neighbours(self):
@@ -397,7 +472,7 @@ class TranscriptionFallbackTests(YouTubeCase):
             meta={}, meta_code=1, subs={},
         )
         count, report, _ = self.run_channel(fake)
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 0)
         self.assertIn("could not read this video", report)
 
     def test_over_long_videos_are_skipped_with_a_stated_reason(self):
@@ -436,7 +511,9 @@ class TranscriptionFallbackTests(YouTubeCase):
             subs={"en": json3(GOOD_TEXT.split(". "))},
         )
         count, report, _ = self.run_channel(fake)
-        self.assertEqual(count, 2)
+        # One video was opened and yielded a transcript; the second is listed
+        # but unread, so it is not evidence.
+        self.assertEqual(count, 1)
         self.assertIn("Read the top 1 of 2 matches", report)
         self.assertIn("not read", report)
 
@@ -618,6 +695,297 @@ class ToolingTests(YouTubeCase):
             self.assertNotIn(
                 token, source, f"{SOURCE.name} must not contain {token!r}"
             )
+
+
+class ConfigIsolationTests(YouTubeCase):
+    """yt-dlp reads a yt-dlp.conf from the CURRENT DIRECTORY, and research runs
+    execute inside the user's project. A checked-in config could otherwise
+    inject arbitrary options — including ones that execute commands."""
+
+    def run_once(self):
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return subprocess.CompletedProcess(argv, 0, b"{}", b"")
+
+        with mock.patch.object(
+            youtube_mod, "_yt_dlp_argv", return_value=["yt-dlp"]
+        ), mock.patch.object(subprocess, "run", fake_run):
+            youtube_mod._run_yt_dlp(["--version"], timeout=5)
+        return captured
+
+    def test_every_invocation_disables_config_discovery(self):
+        captured = self.run_once()
+        self.assertIn("--ignore-config", captured["argv"])
+        # Immediately after the binary, before anything a caller supplied.
+        self.assertEqual(captured["argv"][1], "--ignore-config")
+
+    def test_child_runs_in_a_private_directory(self):
+        captured = self.run_once()
+        cwd = captured["kwargs"].get("cwd")
+        self.assertTrue(cwd)
+        # Not the repo / not the launch dir: a throwaway directory.
+        self.assertNotEqual(Path(cwd), Path.cwd())
+
+    def test_unrunnable_binary_is_reported_not_raised(self):
+        with mock.patch.object(
+            youtube_mod, "_yt_dlp_argv", return_value=["yt-dlp"]
+        ), mock.patch.object(subprocess, "run", side_effect=OSError("denied")):
+            code, out, err = youtube_mod._run_yt_dlp(["--version"], timeout=5)
+        self.assertNotEqual(code, 0)
+        self.assertIn("could not run yt-dlp", err)
+
+
+class MissingToolTests(YouTubeCase):
+    """A missing tool is a CHANNEL failure on BOTH discovery paths — the
+    documented degrade is youtube.ERROR.md, not a healthy report full of
+    per-video excuses."""
+
+    def channel_with_no_tool(self, topic):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "youtube.md"
+            with mock.patch.object(
+                youtube_mod, "_yt_dlp_argv",
+                side_effect=youtube_mod.YouTubeToolMissing(youtube_mod.INSTALL_HINT),
+            ):
+                with self.assertRaises(youtube_mod.YouTubeToolMissing) as ctx:
+                    youtube_mod.channel_youtube(topic, out, 10)
+        return str(ctx.exception)
+
+    def test_keyword_query_propagates_the_install_hint(self):
+        self.assertIn("pip install yt-dlp", self.channel_with_no_tool(TOPIC))
+
+    def test_explicit_url_query_propagates_too(self):
+        # The regression: this path never calls _search, so before the
+        # channel-level probe it degraded per-video and reported status ok.
+        message = self.channel_with_no_tool(f"https://youtu.be/{VIDEO_ID}")
+        self.assertIn("pip install yt-dlp", message)
+
+
+class AudioBoundsTests(YouTubeCase):
+    """Oversized, live, and partial downloads must never become a transcript
+    that reads as the whole soundtrack."""
+
+    def download(self, responder):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(youtube_mod, "_run_yt_dlp", responder):
+                return youtube_mod._download_audio(
+                    {"url": "https://youtu.be/" + VIDEO_ID}, tmp
+                )
+
+    def test_oversized_audio_is_refused_not_truncated(self):
+        def responder(args, timeout):
+            outdir = Path(args[args.index("-o") + 1]).parent
+            (outdir / "audio.m4a").write_bytes(
+                b"x" * (youtube_mod.AUDIO_BYTES_CAP + 1)
+            )
+            return 0, "", ""
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.download(responder)
+        message = str(ctx.exception)
+        self.assertIn("cap", message)
+        self.assertIn("rather than truncated", message)
+
+    def test_size_and_live_bounds_are_pushed_down_to_the_tool(self):
+        seen = []
+
+        def responder(args, timeout):
+            seen.append(args)
+            outdir = Path(args[args.index("-o") + 1]).parent
+            (outdir / "audio.m4a").write_bytes(b"ok")
+            return 0, "", ""
+
+        self.download(responder)
+        self.assertIn("--max-filesize", seen[0])
+        self.assertIn("--match-filter", seen[0])
+        self.assertIn("!is_live", seen[0])
+
+    def test_partial_fragments_are_never_accepted_as_audio(self):
+        def responder(args, timeout):
+            outdir = Path(args[args.index("-o") + 1]).parent
+            # exactly what an interrupted yt-dlp leaves behind
+            (outdir / "audio.m4a.part").write_bytes(b"half a file")
+            return 0, "", ""
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.download(responder)
+        self.assertIn("no audio file", str(ctx.exception))
+
+    def test_a_failed_exit_is_not_salvaged_from_leftovers(self):
+        def responder(args, timeout):
+            outdir = Path(args[args.index("-o") + 1]).parent
+            (outdir / "audio.m4a").write_bytes(b"truncated")
+            return 1, "", "ERROR: interrupted"
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.download(responder)
+        self.assertIn("exit 1", str(ctx.exception))
+
+    def test_retry_starts_from_a_clean_directory(self):
+        attempts = []
+
+        def responder(args, timeout):
+            attempts.append(args)
+            outdir = Path(args[args.index("-o") + 1]).parent
+            if len(attempts) == 1:
+                (outdir / "audio.m4a").write_bytes(b"stale leftover")
+                return 1, "", "ERROR: Requested format is not available."
+            self.assertEqual(list(outdir.glob("audio.*")), [])
+            (outdir / "audio.webm").write_bytes(b"fresh")
+            return 0, "", ""
+
+        blob, mime = self.download(responder)
+        self.assertEqual(blob, b"fresh")
+        self.assertEqual(mime, "audio/webm")
+
+    def test_retry_stays_audio_only_and_is_not_given_a_second_full_timeout(self):
+        seen = []
+
+        def responder(args, timeout):
+            seen.append((args[args.index("-f") + 1], timeout))
+            if len(seen) == 1:
+                return 1, "", "ERROR: Requested format is not available."
+            outdir = Path(args[args.index("-o") + 1]).parent
+            (outdir / "audio.m4a").write_bytes(b"ok")
+            return 0, "", ""
+
+        self.download(responder)
+        # never "best" on its own — that can be a full muxed video
+        self.assertNotIn("/best", seen[1][0])
+        self.assertLess(seen[1][1], seen[0][1])
+
+
+class BudgetTests(YouTubeCase):
+    def search_lines(self, count):
+        return [
+            search_record(f"vid{i:07d}xxx"[:11], f"context engineering {i}", 900 - i)
+            for i in range(count)
+        ]
+
+    def test_failed_transcriptions_still_consume_the_budget(self):
+        """Three failures in a row are three downloads and three vendor calls
+        already paid for — counting only successes would keep retrying."""
+        os.environ["DEEP_RESEARCH_YOUTUBE_TRANSCRIBE_TOP"] = "2"
+        fake = FakeYtDlp(
+            search_lines=self.search_lines(4),
+            meta={"subtitles": {}, "duration": 472},
+            subs={},
+        )
+        transcriber = FakeTranscriber(error=RuntimeError("vendor down"))
+        _, report, _ = self.run_channel(fake, transcriber=transcriber)
+        attempts = sum(
+            1 for call in fake.calls if "-f" in call
+        )
+        self.assertEqual(attempts, 2)
+        self.assertIn("transcription budget spent", report)
+
+    def test_no_route_means_no_download_is_ever_attempted(self):
+        """With nothing configured there is nothing to gain from fetching
+        megabytes we cannot transcribe."""
+        fake = FakeYtDlp(
+            search_lines=self.search_lines(2),
+            meta={"subtitles": {}, "duration": 472},
+            subs={},
+        )
+        _, report, transcriber = self.run_channel(
+            fake, route=(None, "no local install and no cloud key")
+        )
+        self.assertEqual(transcriber.calls, [])
+        self.assertFalse([c for c in fake.calls if "-f" in c])
+        self.assertIn("No transcription route configured", report)
+
+    def test_wall_clock_budget_stops_the_run_and_says_so(self):
+        os.environ["DEEP_RESEARCH_YOUTUBE_DEADLINE"] = "0"
+        fake = FakeYtDlp(
+            search_lines=self.search_lines(3),
+            meta={"subtitles": {"en": [{}]}, "duration": 472, "language": "en"},
+            subs={"en": json3(GOOD_TEXT.split(". "))},
+        )
+        count, report, _ = self.run_channel(fake)
+        self.assertEqual(count, 0)
+        self.assertIn("wall-clock budget", report)
+
+    def test_unknown_duration_is_skipped_rather_than_downloaded(self):
+        """A live stream reports no duration anywhere, so the length cap cannot
+        bound it — the download would run until something else stops it."""
+        fake = FakeYtDlp(
+            search_lines=[search_record(
+                VIDEO_ID, "context engineering live", 900, duration=None
+            )],
+            meta={"subtitles": {}},  # no duration in the metadata either
+            subs={},
+        )
+        _, report, transcriber = self.run_channel(fake)
+        self.assertEqual(transcriber.calls, [])
+        self.assertIn("duration unknown", report)
+
+
+class ReportHonestyTests(YouTubeCase):
+    def usable(self):
+        return [search_record(VIDEO_ID, "context engineering explained", 900)]
+
+    def test_rejected_captions_are_not_reported_as_absent(self):
+        fake = FakeYtDlp(
+            search_lines=self.usable(),
+            meta={"subtitles": {}, "duration": 472, "language": "en"},
+            subs={"en-orig": json3([RAW_ASR_TEXT])},
+        )
+        transcriber = FakeTranscriber(error=RuntimeError("vendor down"))
+        _, report, _ = self.run_channel(fake, transcriber=transcriber)
+        self.assertIn(youtube_mod.SOURCE_REJECTED, report)
+        self.assertNotIn(youtube_mod.SOURCE_NONE, report)
+
+    def test_local_route_is_disclosed_as_free_and_private(self):
+        fake = FakeYtDlp(
+            search_lines=self.usable(),
+            meta={"subtitles": {}, "duration": 472},
+            subs={},
+        )
+        _, report, _ = self.run_channel(fake, route=("local", "profile self"))
+        self.assertIn("never left this machine", report)
+
+    def test_cloud_route_is_disclosed_as_billed(self):
+        fake = FakeYtDlp(
+            search_lines=self.usable(),
+            meta={"subtitles": {}, "duration": 472},
+            subs={},
+        )
+        _, report, _ = self.run_channel(fake, route=("groq", "key configured"))
+        self.assertIn("billed to your key", report)
+
+    def test_full_transcripts_are_saved_beside_the_report(self):
+        fake = FakeYtDlp(
+            search_lines=self.usable(),
+            meta={"subtitles": {}, "duration": 472},
+            subs={},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            _, report, _ = self.run_channel(fake, out_dir=tmp)
+            saved = Path(tmp) / youtube_mod.TRANSCRIPT_DIR_NAME / f"{VIDEO_ID}.txt"
+            self.assertTrue(saved.exists())
+            text = saved.read_text(encoding="utf-8")
+        # the evidence we paid to produce is kept in full, not just excerpted
+        self.assertIn("whisper heard this", text)
+        self.assertIn(VIDEO_ID, report)
+        self.assertIn(youtube_mod.TRANSCRIPT_DIR_NAME, report)
+
+    def test_each_video_gets_its_own_captions(self):
+        """Regression guard on the harness itself: caption files must land
+        under the id yt-dlp was asked about, not one shared constant."""
+        fake = FakeYtDlp(
+            search_lines=[
+                search_record("aaaaaaaaaaa", "context engineering one", 900),
+                search_record("bbbbbbbbbbb", "context engineering two", 800),
+            ],
+            meta={"subtitles": {"en": [{}]}, "duration": 472, "language": "en"},
+            subs={"en": json3(GOOD_TEXT.split(". "))},
+        )
+        count, report, _ = self.run_channel(fake)
+        self.assertEqual(count, 2)
+        self.assertEqual(report.count(youtube_mod.SOURCE_MANUAL), 2)
 
 
 class RegistryTests(YouTubeCase):
