@@ -6,8 +6,8 @@
  * Thin, transparent shim: it prints exactly which commands it will run,
  * asks before running them, and touches nothing else.
  *
- *   npx -y zbs-researcher@latest          # interactive (confirms first)
- *   npx -y zbs-researcher@latest --yes    # non-interactive
+ *   npx -y @zbs-gg/zbs-researcher@latest          # interactive (confirms first)
+ *   npx -y @zbs-gg/zbs-researcher@latest --yes    # non-interactive
  *
  * Node >= 18, zero dependencies (node stdlib only).
  */
@@ -76,7 +76,7 @@ function printPlannedCommands() {
 }
 
 function printHelp() {
-  console.log("Usage: npx -y zbs-researcher@latest [options]");
+  console.log("Usage: npx -y @zbs-gg/zbs-researcher@latest [options]");
   console.log("");
   console.log("Installs the deep-research (ZBS Researcher) Claude Code plugin.");
   console.log("");

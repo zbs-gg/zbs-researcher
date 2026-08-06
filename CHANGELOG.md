@@ -40,6 +40,13 @@ published under the ZBS organization.
   unaffected. It is not replaceable with a plain HTTP call: YouTube's
   `timedtext` endpoint is PoToken-gated and returns an empty body to
   unauthenticated programmatic requests.
+- **The npm package moved to the ZBS organization's scope:**
+  `zbs-researcher` → **`@zbs-gg/zbs-researcher`**, so the install command now
+  reads `npx -y @zbs-gg/zbs-researcher@latest` and matches the GitHub slug the
+  installer already uses (`claude plugin marketplace add zbs-gg/zbs-researcher`).
+  npm has no `org/name` form — only a scope shows the owner in the name. The
+  old unscoped `zbs-researcher` is deprecated with a pointer to the new name
+  rather than unpublished, so anything already depending on it keeps working.
 - Housekeeping: plugin, marketplace and npm installer versions are one number
   again (0.5.0 — they had drifted to 0.4.0/0.1.1); plugin and marketplace
   ownership moved from the personal account to the ZBS organization; the

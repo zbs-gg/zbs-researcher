@@ -24,7 +24,7 @@ to start, but that is a property, not the argument.
 ## One-command install
 
 ```bash
-npx -y zbs-researcher@latest
+npx -y @zbs-gg/zbs-researcher@latest
 ```
 
 No node — the same two commands the installer runs (node not required):

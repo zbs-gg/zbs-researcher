@@ -1,63 +1,72 @@
-# Releasing the `zbs-researcher` installer to npm
+# Releasing the installer to npm
 
 The package is the thin `npx` shim in this directory. The plugin itself is
 installed by the `claude` CLI, not by npm — so this package stays tiny and its
 only job is to run two commands.
 
-## One-time: move ownership to the ZBS organization
+Published name: **`@zbs-gg/zbs-researcher`** — a scoped package, owned by the
+`zbs-gg` npm organization. The scope is what makes the org visible in the name,
+matching the GitHub slug `zbs-gg/zbs-researcher`.
 
-`zbs-researcher@0.1.0` was published on 2026-07-21 from a personal account.
-npm organizations can own **unscoped** packages, so the package name — and
-therefore the install command `npx -y zbs-researcher@latest` — does not change.
+> npm has no `org/name` form. A package is either unscoped (`zbs-researcher` —
+> the name shows nothing about who owns it) or scoped (`@zbs-gg/zbs-researcher`).
+> Only the scoped form displays the organization, and only the scoped form can
+> be published entirely from the CLI — moving an *unscoped* package to an org
+> requires the npmjs.com web UI.
 
-1. Create the organization at <https://www.npmjs.com/org/create> (free plan
-   covers unlimited public packages).
-2. Open the organization → **Packages** → **Add Existing Package** → type
-   `zbs-researcher` → add it.
-3. Confirm ownership moved: <https://www.npmjs.com/package/zbs-researcher>
-   should list the organization as maintainer.
-
-Steps 1–2 require being signed in to npm in a browser. They cannot be done
-from the CLI.
-
-## Every release
+## Publish
 
 ```bash
 npm whoami
 ```
 
+Must print the account that owns the `zbs-gg` org. Check the org itself:
+
+```bash
+npm org ls zbs-gg
+```
+
+A non-existent org answers `E404 Scope not found`, so a real listing is proof.
+Then inspect what would ship:
+
 ```bash
 cd installer && npm publish --dry-run
 ```
 
-Read the dry-run file list: it must be exactly three files — `bin/cli.js`,
-`package.json`, `README.md` (about 4.5 kB packed). Anything else means `files`
-in `package.json` drifted. The dry run must also print no `npm warn publish`
-lines; a warning there means npm silently rewrote a field.
+The file list must be exactly three files — `bin/cli.js`, `package.json`,
+`README.md` (about 4.5 kB packed). Anything else means `files` in
+`package.json` drifted. There must be no `npm warn publish` lines; a warning
+means npm silently rewrote a field.
 
 ```bash
-cd installer && npm publish
+cd installer && npm publish --access public
 ```
 
-Then verify the published metadata rather than trusting the upload:
+`--access public` is required on the **first** publish of a scoped package:
+scoped packages default to private, and a private publish fails on the free
+plan. `publishConfig.access` in `package.json` already sets it, so the flag is
+belt-and-braces.
+
+Verify from the registry rather than trusting the upload:
 
 ```bash
-npm view zbs-researcher version description maintainers
+npm view @zbs-gg/zbs-researcher version maintainers
 ```
 
-## Retiring the old 0.1.0
+## The old unscoped package
 
-Prefer **deprecate** over unpublish:
+`zbs-researcher@0.1.0` was published on 2026-07-21 from the personal account.
+It is superseded, not deleted — point people at the new name:
 
 ```bash
-npm deprecate zbs-researcher@0.1.0 "Superseded by 0.5.0 — npx -y zbs-researcher@latest"
+npm deprecate zbs-researcher "Moved to @zbs-gg/zbs-researcher — npx -y @zbs-gg/zbs-researcher@latest"
 ```
 
 Why not `npm unpublish`: the free 72-hour unpublish window closed on
-2026-07-24, and unpublishing a version burns that exact version number
-permanently — `0.1.0` could never be republished. Since the package name is
-being kept either way, removal buys nothing that deprecation does not, and
-deprecation is reversible (`npm deprecate <pkg>@<ver> ""` clears it).
+2026-07-24, and unpublishing burns that version number permanently — `0.1.0`
+could never be republished under that name. Deprecation shows a warning on
+every install, is reversible (`npm deprecate <pkg> ""` clears it), and keeps
+anyone who already depends on the old name working.
 
 ## Version agreement
 

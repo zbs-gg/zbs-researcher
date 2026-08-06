@@ -1,5 +1,5 @@
 {
-  "name": "zbs-researcher",
+  "name": "@zbs-gg/zbs-researcher",
   "version": "0.5.0",
   "description": "One-command installer for the ZBS Researcher (deep-research) Claude Code plugin: adds the zbs-researcher marketplace and installs the plugin.",
   "bin": {
