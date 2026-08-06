@@ -50,15 +50,27 @@ finally:
 
 GROQ_KEY = "gsk_FakeMediaKey123"  # short: stays under the selftest secret-scan floor
 GEMINI_KEY = "AIzaFakeVisionKey123"
+ROUTER_KEY = "sk-or-FakeRouterKey123"
 AUDIO = b"\xffRIFF-fake-audio-bytes"
 IMAGE = b"\x89PNG-fake-image-bytes"
+
+# Every env var that can steer a route must be cleared, or a developer's own
+# shell (a real OPENROUTER_API_KEY, a forced route) silently decides the
+# outcome of a test.
+_STEERING_ENV = (
+    "GROQ_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "DEEP_RESEARCH_PROFILE",
+    "DEEP_RESEARCH_TRANSCRIBE_BACKEND",
+)
 
 
 @contextlib.contextmanager
 def isolated_env(secrets_dir, **overrides):
     """No host key (env or secrets-dir file) may satisfy a test."""
     with mock.patch.dict(os.environ):
-        for name in ("GROQ_API_KEY", "GEMINI_API_KEY", "DEEP_RESEARCH_PROFILE"):
+        for name in _STEERING_ENV:
             os.environ.pop(name, None)
         os.environ["DEEP_RESEARCH_SECRETS_DIR"] = str(secrets_dir)
         os.environ.update(overrides)
@@ -249,8 +261,214 @@ class SelfBackendTests(unittest.TestCase):
         self.assertEqual(captured["bytes"], AUDIO)
 
 
+def _write_marker(secrets_dir, payload):
+    """Write <secrets-dir>/onboarding.json verbatim (str payloads land raw, so
+    malformed-marker tolerance can be exercised)."""
+    path = Path(secrets_dir) / "onboarding.json"
+    path.write_text(
+        payload if isinstance(payload, str) else json.dumps(payload),
+        encoding="utf-8",
+    )
+
+
+class TranscribeRouteTests(unittest.TestCase):
+    """Audio routing is resolved independently of the vision profile."""
+
+    def route(self, secrets_dir, **overrides):
+        with isolated_env(secrets_dir, **overrides):
+            return media_backend.resolve_transcribe_route()
+
+    def test_no_local_install_and_no_key_leaves_route_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            route, reason = self.route(tmp)
+        self.assertIsNone(route)
+        self.assertTrue(reason)
+
+    def test_groq_key_wins_when_only_groq_is_configured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            route, _ = self.route(tmp, GROQ_API_KEY=GROQ_KEY)
+        self.assertEqual(route, "groq")
+
+    def test_openrouter_key_alone_resolves_to_openrouter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            route, _ = self.route(tmp, OPENROUTER_API_KEY=ROUTER_KEY)
+        self.assertEqual(route, "openrouter")
+
+    def test_groq_preferred_over_openrouter_when_both_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            route, _ = self.route(
+                tmp, GROQ_API_KEY=GROQ_KEY, OPENROUTER_API_KEY=ROUTER_KEY
+            )
+        self.assertEqual(route, "groq")
+
+    def test_self_profile_routes_audio_locally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            route, _ = self.route(
+                tmp, DEEP_RESEARCH_PROFILE="self", GROQ_API_KEY=GROQ_KEY
+            )
+        self.assertEqual(route, "local")
+
+    def test_env_force_overrides_everything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_marker(tmp, {"transcribe": "groq"})
+            route, reason = self.route(
+                tmp,
+                DEEP_RESEARCH_TRANSCRIBE_BACKEND="openrouter",
+                GROQ_API_KEY=GROQ_KEY,
+            )
+        self.assertEqual(route, "openrouter")
+        self.assertIn("DEEP_RESEARCH_TRANSCRIBE_BACKEND", reason)
+
+    def test_unknown_forced_route_warns_and_is_ignored(self):
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(
+            stderr
+        ):
+            route, _ = self.route(
+                tmp,
+                DEEP_RESEARCH_TRANSCRIBE_BACKEND="mainframe",
+                GROQ_API_KEY=GROQ_KEY,
+            )
+        self.assertEqual(route, "groq")
+        self.assertIn("mainframe", stderr.getvalue())
+
+    def test_onboarding_answer_is_honored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_marker(tmp, {"wizard_done": True, "transcribe": "local"})
+            route, reason = self.route(tmp, GROQ_API_KEY=GROQ_KEY)
+        self.assertEqual(route, "local")
+        self.assertIn("onboarding", reason)
+
+    def test_explicit_choice_is_honored_even_without_its_credential(self):
+        """Honesty over convenience: a chosen route that cannot run must say
+        so, not silently bill a provider the user did not pick."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_marker(tmp, {"transcribe": "openrouter"})
+            route, _ = self.route(tmp, GROQ_API_KEY=GROQ_KEY)
+        self.assertEqual(route, "openrouter")
+
+    def test_malformed_marker_degrades_to_derivation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_marker(tmp, "{not json at all")
+            route, _ = self.route(tmp, GROQ_API_KEY=GROQ_KEY)
+        self.assertEqual(route, "groq")
+
+    def test_unknown_marker_value_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_marker(tmp, {"transcribe": "carrier-pigeon"})
+            route, _ = self.route(tmp, GROQ_API_KEY=GROQ_KEY)
+        self.assertEqual(route, "groq")
+
+    def test_get_transcriber_maps_each_route_to_its_backend(self):
+        cases = [
+            ({"GROQ_API_KEY": GROQ_KEY}, media_backend.ClientBackend),
+            ({"OPENROUTER_API_KEY": ROUTER_KEY}, media_backend.OpenRouterBackend),
+            ({"DEEP_RESEARCH_PROFILE": "self"}, media_backend.SelfBackend),
+            ({}, media_backend.UnconfiguredTranscriber),
+        ]
+        for overrides, expected in cases:
+            with self.subTest(expected=expected.__name__):
+                with tempfile.TemporaryDirectory() as tmp, isolated_env(
+                    tmp, **overrides
+                ):
+                    self.assertIsInstance(
+                        media_backend.get_transcriber(), expected
+                    )
+
+    def test_unconfigured_transcriber_names_all_three_options(self):
+        recorder = Recorder({"text": "never"})
+        with tempfile.TemporaryDirectory() as tmp, isolated_env(tmp), \
+                mock.patch.object(media_backend, "_http_post_raw", recorder):
+            with self.assertRaises(media_backend.MediaBackendError) as ctx:
+                media_backend.get_transcriber().transcribe(AUDIO)
+        message = str(ctx.exception)
+        for hint in ("mlx-whisper", "GROQ_API_KEY", "OPENROUTER_API_KEY"):
+            self.assertIn(hint, message)
+        self.assertEqual(recorder.calls, [])
+
+    def test_vision_profile_is_unaffected_by_an_openrouter_key(self):
+        """Regression guard: routing audio must never change which backend
+        get_backend() hands out for vision."""
+        with tempfile.TemporaryDirectory() as tmp, isolated_env(
+            tmp, OPENROUTER_API_KEY=ROUTER_KEY
+        ):
+            self.assertIsInstance(
+                media_backend.get_backend(), media_backend.ClientBackend
+            )
+
+
+class OpenRouterTranscribeTests(unittest.TestCase):
+    def test_transcribe_posts_base64_input_audio(self):
+        recorder = Recorder({"text": " routed transcript "})
+        with tempfile.TemporaryDirectory() as tmp, isolated_env(
+            tmp, OPENROUTER_API_KEY=ROUTER_KEY
+        ), mock.patch.object(media_backend, "_http_post_raw", recorder):
+            text = media_backend.get_transcriber().transcribe(
+                AUDIO, mime="audio/mp4"
+            )
+
+        self.assertEqual(text, "routed transcript")
+        self.assertEqual(len(recorder.calls), 1)
+        url, data, headers, _ = recorder.calls[0]
+        self.assertEqual(
+            url, "https://openrouter.ai/api/v1/audio/transcriptions"
+        )
+        self.assertEqual(headers["Authorization"], f"Bearer {ROUTER_KEY}")
+        body = json.loads(data.decode("utf-8"))
+        self.assertEqual(body["model"], media_backend.OPENROUTER_TRANSCRIBE_MODEL)
+        self.assertEqual(
+            body["input_audio"]["data"],
+            base64.b64encode(AUDIO).decode("ascii"),
+        )
+        # mime -> bare container name, not a filename and not a dotted ext
+        self.assertEqual(body["input_audio"]["format"], "m4a")
+        # the key never travels in the URL
+        self.assertNotIn(ROUTER_KEY, url)
+
+    def test_key_resolves_from_secrets_file(self):
+        recorder = Recorder({"text": "ok"})
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "openrouter-key.txt").write_text(
+                ROUTER_KEY + "\n", encoding="utf-8"
+            )
+            with isolated_env(tmp), mock.patch.object(
+                media_backend, "_http_post_raw", recorder
+            ):
+                text = media_backend.get_transcriber().transcribe(AUDIO)
+        self.assertEqual(text, "ok")
+        self.assertEqual(
+            recorder.calls[0][2]["Authorization"], f"Bearer {ROUTER_KEY}"
+        )
+
+    def test_missing_key_raises_guidance_without_network(self):
+        recorder = Recorder({"text": "never"})
+        with tempfile.TemporaryDirectory() as tmp, isolated_env(
+            tmp, DEEP_RESEARCH_TRANSCRIBE_BACKEND="openrouter"
+        ), mock.patch.object(media_backend, "_http_post_raw", recorder):
+            with self.assertRaises(media_backend.MediaBackendError) as ctx:
+                media_backend.get_transcriber().transcribe(AUDIO)
+        message = str(ctx.exception)
+        self.assertIn("openrouter-key.txt", message)
+        self.assertIn("OPENROUTER_API_KEY", message)
+        self.assertEqual(recorder.calls, [])
+
+    def test_response_without_text_raises_instead_of_returning_junk(self):
+        recorder = Recorder({"error": {"message": "model unavailable"}})
+        with tempfile.TemporaryDirectory() as tmp, isolated_env(
+            tmp, OPENROUTER_API_KEY=ROUTER_KEY
+        ), mock.patch.object(media_backend, "_http_post_raw", recorder):
+            with self.assertRaises(media_backend.MediaBackendError) as ctx:
+                media_backend.get_transcriber().transcribe(AUDIO)
+        self.assertIn("no text field", str(ctx.exception))
+
+    def test_vision_is_not_routed_through_openrouter(self):
+        with self.assertRaises(media_backend.MediaBackendError) as ctx:
+            media_backend.OpenRouterBackend().describe_image(IMAGE)
+        self.assertIn("transcription only", str(ctx.exception))
+
+
 class EndpointConstraintTests(unittest.TestCase):
-    """R17: never OpenAI, never Anthropic — Groq/Gemini only."""
+    """R17: never OpenAI, never Anthropic — Groq/Gemini/OpenRouter only."""
 
     def test_source_contains_no_openai_or_anthropic_endpoints(self):
         source = MEDIA.read_text(encoding="utf-8")
@@ -263,6 +481,13 @@ class EndpointConstraintTests(unittest.TestCase):
         )
         self.assertIn(
             "generativelanguage.googleapis.com", media_backend.GEMINI_BASE_URL
+        )
+
+    def test_openrouter_endpoint_is_the_broker_not_a_vendor(self):
+        self.assertTrue(
+            media_backend.OPENROUTER_TRANSCRIBE_URL.startswith(
+                "https://openrouter.ai/"
+            )
         )
 
     def test_source_avoids_posix_only_calls(self):

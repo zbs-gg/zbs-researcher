@@ -46,6 +46,8 @@ STATE_ENV_VARS = (
     "THREADS_ACCESS_TOKEN",
     "DEEP_RESEARCH_PROFILE",
     "DEEP_RESEARCH_CARTOGRAPHER_URL",
+    # Steers which transcription route the state reports.
+    "DEEP_RESEARCH_TRANSCRIBE_BACKEND",
 )
 
 
@@ -64,8 +66,15 @@ class DetectStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, isolated_environment(tmp):
             state = detect_state.collect_state()
 
+        # The credential/onboarding half is exact. The hardware half is
+        # machine-dependent by definition, so it is asserted structurally in
+        # HardwareProbeTests — compared here it would only pass on one laptop.
+        credential_state = {
+            key: value for key, value in state.items()
+            if key not in ("hardware", "local_media")
+        }
         self.assertEqual(
-            state,
+            credential_state,
             {
                 "providers": {
                     "gemini": False,
@@ -84,6 +93,8 @@ class DetectStateTests(unittest.TestCase):
                 "persona": None,
             },
         )
+        self.assertIn("hardware", state)
+        self.assertIn("local_media", state)
 
     def test_malformed_cartographer_url_never_crashes_state_or_doctor(self):
         # Review regression: a bracket-malformed DEEP_RESEARCH_CARTOGRAPHER_URL
@@ -314,6 +325,99 @@ class DetectStateTests(unittest.TestCase):
         source = DETECT.read_text(encoding="utf-8")
         for token in ("SIGALRM", "killpg", "fcntl", "os.fork", "setsid", "pwd.", "grp."):
             self.assertNotIn(token, source)
+
+
+class HardwareProbeTests(unittest.TestCase):
+    """The wizard cannot offer the free local route without seeing the machine.
+    Every probe is guarded: a SessionStart hook that crashes kills the session.
+    """
+
+    HARDWARE_KEYS = {"os", "arch", "apple_silicon", "ram_gb", "cpu_count", "chip"}
+    MEDIA_KEYS = {"mlx_whisper", "yt_dlp", "transcribe_route", "recommendation"}
+
+    def test_hardware_profile_has_the_documented_shape(self):
+        hardware = detect_state.hardware_profile()
+        self.assertEqual(set(hardware), self.HARDWARE_KEYS)
+        self.assertIsInstance(hardware["apple_silicon"], bool)
+        for field in ("ram_gb", "cpu_count"):
+            self.assertTrue(
+                hardware[field] is None or isinstance(hardware[field], int)
+            )
+
+    def test_local_media_state_has_the_documented_shape(self):
+        media = detect_state.local_media_state()
+        self.assertEqual(set(media), self.MEDIA_KEYS)
+        self.assertIsInstance(media["mlx_whisper"], bool)
+        self.assertIsInstance(media["yt_dlp"], bool)
+        self.assertIn(media["recommendation"], ("capable", "tight", "cloud"))
+
+    def test_recommendation_follows_silicon_and_memory(self):
+        cases = [
+            ({"apple_silicon": True, "ram_gb": 64}, "capable"),
+            ({"apple_silicon": True, "ram_gb": 16}, "capable"),
+            ({"apple_silicon": True, "ram_gb": 8}, "tight"),
+            ({"apple_silicon": True, "ram_gb": 4}, "cloud"),
+            # MLX is Apple-silicon only: never suggest what the user can't run.
+            ({"apple_silicon": False, "ram_gb": 128}, "cloud"),
+            ({"apple_silicon": True, "ram_gb": None}, "cloud"),
+        ]
+        for hardware, expected in cases:
+            with self.subTest(hardware=hardware):
+                self.assertEqual(
+                    detect_state._local_recommendation(hardware), expected
+                )
+
+    def test_unavailable_ram_probe_reports_none_instead_of_raising(self):
+        with mock.patch.object(
+            detect_state.os, "sysconf", side_effect=OSError("nope")
+        ), mock.patch.object(detect_state, "ctypes", object()):
+            self.assertIsNone(detect_state._total_ram_gb())
+
+    def test_chip_probe_is_skipped_off_macos(self):
+        self.assertIsNone(detect_state._chip_name("linux"))
+        self.assertIsNone(detect_state._chip_name("windows"))
+
+    def test_chip_probe_survives_a_missing_sysctl(self):
+        with mock.patch.object(
+            detect_state.subprocess, "run", side_effect=OSError("no sysctl")
+        ):
+            self.assertIsNone(detect_state._chip_name("darwin"))
+
+    def test_collect_state_carries_both_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with isolated_environment(tmp):
+                state = detect_state.collect_state()
+        self.assertEqual(set(state["hardware"]), self.HARDWARE_KEYS)
+        self.assertEqual(set(state["local_media"]), self.MEDIA_KEYS)
+
+    def test_degrade_shape_carries_hardware_so_the_wizard_stays_informed(self):
+        """A broken key file must not also blind the wizard to the machine."""
+        state = detect_state._absent_state()
+        self.assertEqual(set(state["hardware"]), self.HARDWARE_KEYS)
+        self.assertEqual(set(state["local_media"]), self.MEDIA_KEYS)
+
+    def test_doctor_lines_name_the_machine_and_the_route(self):
+        lines = detect_state._hardware_lines({
+            "hardware": {"chip": "Apple M4 Max", "ram_gb": 64, "arch": "arm64"},
+            "local_media": {"transcribe_route": "local", "yt_dlp": True,
+                            "mlx_whisper": True, "recommendation": "capable"},
+        })
+        text = "\n".join(lines)
+        self.assertIn("Apple M4 Max, 64 GB", text)
+        self.assertIn("nothing leaves this machine", text)
+        self.assertIn("yt-dlp present", text)
+
+    def test_doctor_lines_say_how_to_fix_an_unconfigured_route(self):
+        lines = detect_state._hardware_lines({
+            "hardware": {"chip": None, "ram_gb": None, "arch": None},
+            "local_media": {"transcribe_route": None, "yt_dlp": False,
+                            "mlx_whisper": False, "recommendation": "cloud"},
+        })
+        text = "\n".join(lines)
+        self.assertIn("not configured", text)
+        self.assertIn("mlx-whisper", text)
+        self.assertIn("GROQ_API_KEY", text)
+        self.assertIn("unknown RAM", text)
 
 
 class DiagnoseCliTests(unittest.TestCase):

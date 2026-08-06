@@ -40,6 +40,9 @@ _REACHABILITY = {
     "github-issues": ("yes", "public GitHub issues, fully web-indexed"),
     "hackernews": ("yes", "public Hacker News threads, fully web-indexed"),
     "bluesky": ("yes", "public Bluesky posts, web-indexed"),
+    "youtube": ("partial",
+                "spoken content inside videos — a web index reads titles and "
+                "descriptions, not what was actually said"),
     "gemini": ("yes", "LLM lens grounded in the public web index"),
     "perplexity": ("yes", "LLM lens grounded in the public web index"),
 }
@@ -61,14 +64,21 @@ def _format_hours(hours):
     return str(hours)
 
 
-def web_index_reachable(source, newest_item_age_hours=None):
+def web_index_reachable(source, newest_item_age_hours=None, self_sourced=False):
     """Classify one source: ("yes"|"partial"|"no", human-readable reason).
 
-    Applies the static table, then the freshness override: a live-social
-    "partial" source whose newest item is under PRE_INDEX_WINDOW_HOURS old
-    flips to "no" — that item is not yet in any web index. An unknown age
-    (None) never triggers the override.
+    `self_sourced` outranks everything: when the run MANUFACTURED the evidence
+    (transcribing a video's audio itself, say), the text provably exists in no
+    index — that is a fact about what we did, not a heuristic about a platform.
+
+    Otherwise applies the static table, then the freshness override: a
+    live-social "partial" source whose newest item is under
+    PRE_INDEX_WINDOW_HOURS old flips to "no" — that item is not yet in any web
+    index. An unknown age (None) never triggers the override.
     """
+    if self_sourced:
+        return "no", ("produced by this run (own transcription) — this text "
+                      "exists in no web index")
     tag, reason = _REACHABILITY.get(source, ("yes", _UNKNOWN_REASON))
     if (
         tag == "partial"
@@ -82,18 +92,21 @@ def web_index_reachable(source, newest_item_age_hours=None):
 
 
 def provenance_record(source, query, items, newest_item_age_hours=None,
-                      fetched_at=None):
+                      fetched_at=None, self_sourced=False):
     """Build the truthful per-fire provenance record (pure, no network).
 
     `items` is the fired result — a list (counted) or an already-known int
     count. `fetched_at` is an ISO string, injectable for tests, defaulting to
     now (UTC). `freshness_hours` is None when the age is unknown or the
     result is empty — an empty run makes no freshness claim, so it cannot
-    trigger the pre-index override either.
+    trigger the pre-index override either. `self_sourced` is set by channels
+    that produced evidence themselves; an EMPTY result can never claim it.
     """
     count = items if isinstance(items, int) else len(items or [])
     freshness = newest_item_age_hours if count else None
-    tag, reason = web_index_reachable(source, freshness)
+    tag, reason = web_index_reachable(
+        source, freshness, self_sourced=bool(self_sourced) and bool(count)
+    )
     if fetched_at is None:
         fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return {

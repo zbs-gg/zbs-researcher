@@ -82,6 +82,51 @@ class ReachabilityTableTest(unittest.TestCase):
             self.assertEqual(tag, "partial")
             self.assertIn("archive", reason)
 
+    def test_youtube_is_partial_because_speech_is_not_indexed(self):
+        # A web index reads the title and description; it does not read what
+        # the speaker actually said.
+        for age in (None, 3, 500):
+            tag, reason = provenance.web_index_reachable("youtube", age)
+            self.assertEqual(tag, "partial")
+            self.assertIn("said", reason)
+
+    def test_self_sourced_evidence_is_no_for_any_source(self):
+        # We produced the text ourselves (own transcription): it provably
+        # exists in no index. This is a fact about the run, not a heuristic.
+        for source in ("youtube", "github", "hackernews"):
+            tag, reason = provenance.web_index_reachable(
+                source, 500, self_sourced=True
+            )
+            self.assertEqual(tag, "no", f"{source} self-sourced must be 'no'")
+            self.assertIn("no web index", reason)
+
+    def test_self_sourced_outranks_the_static_table(self):
+        plain, _ = provenance.web_index_reachable("youtube", 500)
+        owned, _ = provenance.web_index_reachable("youtube", 500,
+                                                  self_sourced=True)
+        self.assertEqual(plain, "partial")
+        self.assertEqual(owned, "no")
+
+
+class SelfSourcedRecordTests(unittest.TestCase):
+    def test_record_carries_the_self_sourced_downgrade(self):
+        record = provenance.provenance_record(
+            "youtube", "context engineering", 3, self_sourced=True
+        )
+        self.assertEqual(record["web_index_reachable"], "no")
+
+    def test_default_record_makes_no_self_sourced_claim(self):
+        record = provenance.provenance_record("youtube", "q", 3)
+        self.assertEqual(record["web_index_reachable"], "partial")
+
+    def test_an_empty_result_can_never_claim_self_sourced(self):
+        """Zero items means we produced nothing — claiming un-indexable
+        evidence there would be a lie."""
+        record = provenance.provenance_record(
+            "youtube", "q", 0, self_sourced=True
+        )
+        self.assertEqual(record["web_index_reachable"], "partial")
+
     def test_unknown_source_defaults_to_yes(self):
         # Conservative default: never claim un-reachability we can't prove.
         tag, reason = provenance.web_index_reachable("some-new-connector", 5)

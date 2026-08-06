@@ -52,6 +52,7 @@ for artifact in (
     "github.md",
     "reddit.md",
     "bluesky.md",
+    "youtube.md",
     "synthesis.md",
     "brief.html",
 ):
@@ -186,7 +187,7 @@ for ref in hook_refs:
         )
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
-expected = "0.4.0"
+expected = "0.5.0"
 if plugin["version"] != expected or listed["version"] != expected:
     raise SystemExit(
         f"version mismatch: plugin={plugin['version']} marketplace={listed['version']} expected={expected}"
