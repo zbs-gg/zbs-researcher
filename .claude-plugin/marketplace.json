@@ -1,8 +1,8 @@
 {
   "name": "zbs-researcher",
   "owner": {
-    "name": "Nikita Shilov",
-    "url": "https://github.com/nkkmnk"
+    "name": "ZBS",
+    "url": "https://github.com/zbs-gg"
   },
   "metadata": {
     "description": "Marketplace hosting the deep-research plugin (ZBS Researcher)."
@@ -11,10 +11,10 @@
     {
       "name": "deep-research",
       "description": "Plan-first project-local multi-channel deep research + Claude synthesis. No Anthropic/OpenAI API spend by default.",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "author": {
-        "name": "Nikita Shilov",
-        "url": "https://github.com/nkkmnk"
+        "name": "ZBS",
+        "url": "https://github.com/zbs-gg"
       },
       "source": "./",
       "category": "productivity",

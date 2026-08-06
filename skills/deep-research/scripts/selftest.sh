@@ -52,6 +52,7 @@ for artifact in (
     "github.md",
     "reddit.md",
     "bluesky.md",
+    "youtube.md",
     "synthesis.md",
     "brief.html",
 ):
@@ -186,10 +187,17 @@ for ref in hook_refs:
         )
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
-expected = "0.4.0"
+expected = "0.5.0"
 if plugin["version"] != expected or listed["version"] != expected:
     raise SystemExit(
         f"version mismatch: plugin={plugin['version']} marketplace={listed['version']} expected={expected}"
+    )
+# The npm installer carries the version too, and NOT checking it is what let
+# plugin/marketplace/installer drift to 0.4.0/0.1.1 before this release.
+installer = json.loads((root / "installer/package.json").read_text(encoding="utf-8"))
+if installer["version"] != expected:
+    raise SystemExit(
+        f"version mismatch: installer/package.json={installer['version']} expected={expected}"
     )
 changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
 if f"## {expected}" not in changelog or "project-local" not in changelog.lower():
@@ -198,7 +206,7 @@ lowered_changelog = changelog.lower()
 for marker in ("ambiguous or malformed", "--only", "--skip", "blank explicit paths"):
     if marker not in lowered_changelog:
         raise SystemExit(f"changelog is missing CLI compatibility marker: {marker}")
-print(f"   plugin + marketplace = {expected}; changelog entry present; no duplicate hooks decl")
+print(f"   plugin + marketplace + installer = {expected}; changelog entry present; no duplicate hooks decl")
 PY
 
 echo "4/10 Windows portability — banned POSIX-only symbols…"

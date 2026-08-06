@@ -201,5 +201,54 @@ class RunConnectorFreshnessTests(unittest.TestCase):
         self.assertNotIn("newest_item_age_hours", rec)
 
 
+class RunConnectorEvidenceSinkTests(RunConnectorFreshnessTests):
+    """The evidence sink is what turns "we transcribed this ourselves" into a
+    coverage receipt, so its wiring needs the same guarantees as freshness."""
+
+    def test_marker_records_the_self_sourced_count(self):
+        def fn(query, out_path, max_items, evidence_sink=None):
+            evidence_sink.append("self-transcribed:a")
+            evidence_sink.append("self-transcribed:b")
+            out_path.write_text("ok")
+            return 2
+
+        rec = self._run(fn, "fake_evidence")
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["self_sourced"])
+        # the COUNT, not just a flag — provenance needs it to avoid
+        # relabelling rows a web index can read
+        self.assertEqual(rec["self_sourced_items"], 2)
+
+    def test_connector_without_the_parameter_never_claims_it(self):
+        def fn(query, out_path, max_items):  # no evidence_sink at all
+            out_path.write_text("ok")
+            return 1
+
+        rec = self._run(fn, "fake_no_evidence")
+        self.assertEqual(rec["status"], "ok")
+        self.assertNotIn("self_sourced", rec)
+
+    def test_untouched_sink_never_claims_it(self):
+        def fn(query, out_path, max_items, evidence_sink=None):
+            out_path.write_text("ok")  # accepts the sink, produces nothing
+            return 3
+
+        rec = self._run(fn, "fake_evidence_empty")
+        self.assertEqual(rec["status"], "ok")
+        self.assertNotIn("self_sourced", rec)
+
+    def test_both_sinks_can_be_requested_together(self):
+        def fn(query, out_path, max_items, freshness_sink=None,
+               evidence_sink=None):
+            dr._note_ts(freshness_sink, time.time() - 3600.0)
+            evidence_sink.append("self-transcribed:a")
+            out_path.write_text("ok")
+            return 1
+
+        rec = self._run(fn, "fake_both_sinks")
+        self.assertIn("newest_item_age_hours", rec)
+        self.assertEqual(rec["self_sourced_items"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.0 — 2026-08-06
+
+YouTube as a real source, three transcription routes, and the first release
+published under the ZBS organization.
+
+- **New `youtube` connector (18th channel, free, no key).** Finds videos by
+  keyword — or takes a video URL straight from the query, so the investigate
+  loop can drill one video it found through another lens. It reads the best
+  caption track available (human-written beats auto beats machine-translated),
+  **judges** that track, and when the track is missing, a translation of a
+  translation, raw unpunctuated ASR, or too sparse for the runtime, it
+  transcribes the audio itself. Every video in the report carries an explicit
+  provenance label, and when a track is rejected the report says why.
+- **That transcript is evidence nothing else has.** A web index reads a video's
+  title and description, never the spoken content, so `youtube` enters the
+  coverage-receipts table as `partial`. When the transcript came from our own
+  Whisper pass it is recorded as `no` — that text provably exists in no index.
+  Empty results can never make the claim.
+- **Transcription now has three routes, chosen independently of the vision
+  profile**: local `mlx-whisper` ($0, Apple silicon, nothing leaves the
+  machine), Groq Whisper, and **new: OpenRouter** `/audio/transcriptions` — so
+  the single Tier-2 OpenRouter key that already drives the LLM lenses now
+  covers audio too. Resolution is explicit env override → the wizard's stored
+  answer → derived from profile and configured keys → an honest error naming
+  all three. A route you chose explicitly is never silently swapped for
+  another provider's bill.
+- **The wizard can see the machine.** `detect_state.py` reports OS,
+  architecture, RAM, CPU count and (on macOS) the chip name, plus whether
+  `mlx-whisper` and `yt-dlp` are installed and which route would run. So on a
+  capable Mac the wizard leads with the free local option by name instead of
+  only ever pitching a paid key; on hardware that cannot run it, local is not
+  offered at all. `--diagnose` prints the machine and the effective route.
+  Every probe is individually guarded — a SessionStart hook must never crash a
+  session.
+- **`yt-dlp` is an optional dependency** (binary on PATH, else the Python
+  package), the same tier as Telethon and MLX. Without it the channel writes
+  `youtube.ERROR.md` with install guidance and every other channel is
+  unaffected. It is not replaceable with a plain HTTP call: YouTube's
+  `timedtext` endpoint is PoToken-gated and returns an empty body to
+  unauthenticated programmatic requests.
+- **The npm package moved to the ZBS organization's scope:**
+  `zbs-researcher` → **`@zbs-gg/zbs-researcher`**, so the install command now
+  reads `npx -y @zbs-gg/zbs-researcher@latest` and matches the GitHub slug the
+  installer already uses (`claude plugin marketplace add zbs-gg/zbs-researcher`).
+  npm has no `org/name` form — only a scope shows the owner in the name. The
+  old unscoped `zbs-researcher` has been unpublished; `0.1.0` can never be
+  republished under that name, which is the accepted cost of removing it.
+- Housekeeping: plugin, marketplace and npm installer versions are one number
+  again (0.5.0 — they had drifted to 0.4.0/0.1.1); plugin and marketplace
+  ownership moved from the personal account to the ZBS organization; the
+  installer gained `publishConfig`, `homepage` and `bugs` so publishing no
+  longer depends on local npm state.
+
 ## 0.4.0 — 2026-07-23
 
 Two new deep-research modes alongside the default broad-scan `single` mode — the

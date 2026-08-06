@@ -253,14 +253,16 @@ def _apify_posts(query, max_items):
 # Transcripts (best-effort; failure degrades to a metadata-only note)
 # ---------------------------------------------------------------------------
 def _media_backend():
-    """Resolve media_backend.get_backend() — sibling module, imported lazily
-    so the connector loads even where the scripts dir isn't on sys.path."""
+    """Resolve media_backend.get_transcriber() — sibling module, imported
+    lazily so the connector loads even where the scripts dir isn't on
+    sys.path. The transcriber (not the vision profile) picks the audio route,
+    so an OpenRouter-only setup transcribes too."""
     try:
         import media_backend
     except ImportError:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import media_backend
-    return media_backend.get_backend()
+    return media_backend.get_transcriber()
 
 
 def _fetch_media_bytes(url, timeout=60, cap=_MEDIA_BYTES_CAP):

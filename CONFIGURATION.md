@@ -47,7 +47,53 @@ under `connectors_skipped` — the run continues with whatever is available.
 | telegram | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` | off by default; needs a Telethon `*.session` in the secrets dir; see the security section below |
 | tiktok-ig | `SCRAPECREATORS_KEY` (or `DEEP_RESEARCH_TIKTOK_VENDOR=apify` + `APIFY_TOKEN`) | off by default; pay-per-use vendor — every run costs credits |
 | threads | `THREADS_ACCESS_TOKEN` (official, free) or `SCRAPECREATORS_KEY` (vendor); `DEEP_RESEARCH_THREADS_VENDOR=scrapecreators` forces the vendor path | key-gated; official path is free (Standard Access = own posts only), vendor path is pay-per-use |
-| media backend (used by tiktok-ig) | `GROQ_API_KEY` (audio), `GEMINI_API_KEY` (vision) — or `DEEP_RESEARCH_PROFILE=self` for local MLX | client profile is cloud-cheap; self profile is $0 local |
+| youtube | none — but needs the `yt-dlp` tool installed | free and on by default; without `yt-dlp` the channel writes `youtube.ERROR.md` and its neighbours keep running |
+| media backend (used by youtube + tiktok-ig) | audio: `GROQ_API_KEY` **or** `OPENROUTER_API_KEY` **or** local `mlx-whisper`; vision: `GEMINI_API_KEY` — or `DEEP_RESEARCH_PROFILE=self` for local MLX | see "Transcription routes" below |
+
+## Transcription routes
+
+Transcription is chosen **independently of the vision profile**, so one
+OpenRouter key can cover audio while vision still runs wherever the profile
+points.
+
+| Route | What runs | Cost | Privacy |
+|---|---|---|---|
+| `local` | `mlx-whisper` (`whisper-large-v3-turbo`, ~6 GB peak) | $0 | audio never leaves the machine |
+| `groq` | Groq Whisper `whisper-large-v3-turbo` | free tier ≈2,000 requests/day, then ≈$0.04 per hour of audio | audio goes to Groq |
+| `openrouter` | OpenRouter `/audio/transcriptions` | per-model, billed by OpenRouter | audio goes to OpenRouter |
+
+`local` is Apple-silicon only (`pip install mlx-whisper`). Resolution order:
+
+1. `DEEP_RESEARCH_TRANSCRIBE_BACKEND=local|groq|openrouter` — forces one route.
+2. `"transcribe"` in `<secrets-dir>/onboarding.json` — what the wizard asked
+   once and stored.
+3. Derived: `DEEP_RESEARCH_PROFILE=self` → local; otherwise Groq when its key
+   is set, else OpenRouter when its key is set.
+4. Nothing configured → the media channels degrade with a note naming all
+   three options. No silent fallback to a provider you did not choose.
+
+An explicitly chosen route is honored even when its credential is missing —
+the error then says exactly what to fix, instead of quietly billing someone
+else. `python3 scripts/deep-research.py --diagnose` prints the machine and the
+route that will actually run.
+
+An explicitly chosen route that is not recognized **fails closed** rather
+than falling through to another provider — answering a typo'd request for
+local transcription by uploading the audio would defeat the point. `self`,
+`mlx` and `offline` are accepted spellings of `local`.
+
+Related env vars: `DEEP_RESEARCH_TRANSCRIBE_MODEL` (OpenRouter model id,
+default `openai/whisper-large-v3`), `DEEP_RESEARCH_WHISPER_MODEL` (Groq model
+id), `DEEP_RESEARCH_SELF_WHISPER_MODEL` (local model, default
+`mlx-community/whisper-large-v3-turbo` — pinned deliberately, because
+mlx-whisper's own default is the much weaker whisper-tiny),
+`DEEP_RESEARCH_LOCAL_TRANSCRIBE_TIMEOUT` (ceiling for one local pass,
+default 900s), `DEEP_RESEARCH_YOUTUBE_READ_TOP` (videos opened per run,
+default 5), `DEEP_RESEARCH_YOUTUBE_TRANSCRIBE_TOP` (videos transcribed per
+run, default 3), `DEEP_RESEARCH_YOUTUBE_MAX_SECONDS` (skip longer videos,
+default 2700), `DEEP_RESEARCH_YOUTUBE_DEADLINE` (wall-clock budget for the
+whole channel, default 480s), `DEEP_RESEARCH_YOUTUBE_SUB_LANGS` (caption
+languages to try, default `en-orig,en`).
 
 ## Key files instead of env vars
 
@@ -60,7 +106,8 @@ export DEEP_RESEARCH_SECRETS_DIR=~/.config/deep-research/secrets
 
 File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
 (or `openai-key.txt` / `openai.txt`), `perplexity-key.txt`,
-`openrouter-key.txt`, `groq-key.txt`, `meta-ads-token.txt`,
+`openrouter-key.txt` (LLM lenses **and** transcription), `groq-key.txt`,
+`meta-ads-token.txt`,
 `producthunt-token.txt`, `scrapecreators-key.txt`, `threads-access-token.txt`,
 `telegram-api-id.txt`,
 `telegram-api-hash.txt`. Each file may hold the bare key or a `KEY = value`
@@ -177,6 +224,7 @@ into research output.
 | github-issues | `api.github.com` (or `gh`) | query text | none (optional `gh` auth) | on |
 | reddit | `arctic-shift.photon-reddit.com` | query text + candidate subreddit names | none | on |
 | bluesky | `public.api.bsky.app` | query text | none | on |
+| youtube | `youtube.com` / `googlevideo.com` via the local `yt-dlp` tool; audio then goes to whichever transcription route is configured (see above) | query text (as a YouTube search), then caption tracks and — only when captions are unusable — the audio of the top videos | none for search/captions; the transcription route needs its own credential | on, degrades to ERROR.md without `yt-dlp` |
 | launch-radar | `hn.algolia.com`, `yc-oss.github.io`, `api.github.com`; with token also `api.producthunt.com` | query text (the yc-oss pull is a plain list download — no query sent) | none; optional `PRODUCTHUNT_TOKEN` | on |
 | revenue-radar | `api.flippa.com`, `substack.com` | nothing topic-specific — category/list pulls, filtered locally | none | on |
 | meta-ads | `graph.facebook.com` (Ad Library, EU scope) | query text + your token | `META_ADS_TOKEN` / `meta-ads-token.txt` | on, auto-skipped without token |
@@ -188,7 +236,10 @@ Non-connector components:
 
 - **`detect_state.py`** (SessionStart hook, `--diagnose`): makes **no network
   calls**. It emits provider **booleans and names only** — never key values,
-  never key prefixes.
+  never key prefixes. It also reports the **machine** (OS, architecture, RAM,
+  CPU count, and on macOS the chip name from a local `sysctl` call) so the
+  wizard can offer the free local transcription route only where it would
+  actually run. That is local hardware information; nothing is transmitted.
 - **`signals.py`** (`--signal want-paid | host-for-me`): appends one JSON line
   to a **local** `demand-signals.jsonl` in the secrets dir (created 0600).
   It POSTs the signal over HTTPS **only** when the operator has set
@@ -206,12 +257,17 @@ Non-connector components:
   `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
   baseline row reads "unavailable", the run side still scores, and no
   network I/O happens.
-- **Media backend** (`media_backend.py`, used by tiktok-ig): in the default
-  `client` profile, audio bytes go to `api.groq.com` (Groq Whisper — Groq's
-  own OpenAI-*compatible* route, not OpenAI) and image bytes to
-  `generativelanguage.googleapis.com` (Gemini vision).
-  `DEEP_RESEARCH_PROFILE=self` runs local MLX models instead — nothing
-  leaves the machine.
+- **Media backend** (`media_backend.py`, used by **youtube and tiktok-ig**):
+  where audio bytes go depends on the resolved transcription route —
+  `api.groq.com` (Groq Whisper — Groq's own OpenAI-*compatible* route, not
+  OpenAI), `openrouter.ai/api/v1/audio/transcriptions` (OpenRouter), or
+  nowhere at all on the `local` route, which runs MLX Whisper on this machine.
+  Image bytes go to `generativelanguage.googleapis.com` (Gemini vision), or
+  stay local under `DEEP_RESEARCH_PROFILE=self`. Only the audio itself and a
+  model id are uploaded — never the research query, and never a key in a URL.
+  **The route is derived from configured keys**, so a key you added for the
+  LLM lenses can also pay for transcription; the report names the route it
+  used, and `--diagnose` shows it before you run.
 - **Telegram session storage**: the Telethon `*.session` file lives **only**
   in the secrets dir (`DEEP_RESEARCH_SECRETS_DIR` or `~/.config/zbs-researcher/secrets`,
   chmod 0600 on POSIX) — never in the project or research output tree. The

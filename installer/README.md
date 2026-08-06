@@ -3,7 +3,7 @@
 One-command installer for the **ZBS Researcher** (`deep-research`) Claude Code plugin.
 
 ```
-npx -y zbs-researcher@latest
+npx -y @zbs-gg/zbs-researcher@latest
 ```
 
 ## What it does (full transparency)
@@ -27,13 +27,13 @@ own (the `claude` CLI does the actual marketplace fetch).
 Interactive (asks y/N before running the commands):
 
 ```
-npx -y zbs-researcher@latest
+npx -y @zbs-gg/zbs-researcher@latest
 ```
 
 Non-interactive (CI, scripts, "just do it"):
 
 ```
-npx -y zbs-researcher@latest --yes
+npx -y @zbs-gg/zbs-researcher@latest --yes
 ```
 
 Note: the first `-y` belongs to **npx** (skip npx's own install prompt); the

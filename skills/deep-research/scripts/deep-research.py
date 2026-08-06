@@ -140,6 +140,7 @@ from connectors.revenue_radar import channel_revenue_radar
 from connectors.telegram import channel_telegram
 from connectors.threads import channel_threads
 from connectors.tiktok_ig import channel_tiktok_ig
+from connectors.youtube import channel_youtube
 
 _market_radar_pkg.attach_runner(globals())
 
@@ -1266,6 +1267,11 @@ CONNECTORS = {
         Connector("github-issues", "direct", channel_github_issues, "issues + comment evidence (free)", []),
         Connector("reddit", "direct", channel_reddit, "top posts via Arctic-Shift archive (free, score+comments)", []),
         Connector("bluesky", "direct", channel_bluesky, "top posts (best-effort)", []),
+        # youtube is free and needs no key, but it DOES need yt-dlp on the box
+        # (optional dependency, same tier as Telethon/MLX). Without it the
+        # channel writes youtube.ERROR.md with install guidance — an honest
+        # degrade, not a silent empty report.
+        Connector("youtube", "direct", channel_youtube, "spoken content in videos — captions, or our own transcription when they're unusable", []),
         Connector("launch-radar", "direct", channel_launch_radar, "what's shipping: Show HN + yc-oss + DevHunt (+PH with token)", []),
         Connector("revenue-radar", "direct", channel_revenue_radar, "what's selling: Flippa sold + Substack leaderboards (free)", []),
         Connector("meta-ads", "direct", channel_meta_ads, "who's paying to advertise: Meta Ad Library, EU scope (free token)", ["meta_ads"]),
@@ -1295,6 +1301,7 @@ OUTPUT_NAMES = {
     "github-issues": "github-issues.md",
     "reddit": "reddit.md",
     "bluesky": "bluesky.md",
+    "youtube": "youtube.md",
     "launch-radar": "launch-radar.md",
     "revenue-radar": "revenue-radar.md",
     "meta-ads": "meta-ads.md",
@@ -1323,10 +1330,18 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
     # (LLM lenses, timestamp-less sources) simply never receive it -> age
     # stays unknown, which is honest.
     freshness_sink = []
+    # Evidence sink (additive, same shape as freshness_sink): a channel that
+    # PRODUCED evidence rather than fetching it — transcribing a video's audio
+    # itself — appends a marker here. Coverage-receipts turn that into the only
+    # honest "no web index has this" claim we can make about our own output.
+    evidence_sink = []
     kwargs = {}
     try:
-        if "freshness_sink" in inspect.signature(conn.fn).parameters:
+        parameters = inspect.signature(conn.fn).parameters
+        if "freshness_sink" in parameters:
             kwargs["freshness_sink"] = freshness_sink
+        if "evidence_sink" in parameters:
+            kwargs["evidence_sink"] = evidence_sink
     except (TypeError, ValueError):
         pass
     try:
@@ -1337,6 +1352,11 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
             record["newest_item_age_hours"] = round(
                 max(0.0, (time.time() - max(freshness_sink)) / 3600.0), 1
             )
+        if evidence_sink:
+            # The COUNT, not just a flag: one self-produced transcript among
+            # five results must not relabel the four a web index can read.
+            record["self_sourced"] = True
+            record["self_sourced_items"] = len(evidence_sink)
         with lock:
             manifest["channels"][conn.name] = record
         if announce:
@@ -1765,7 +1785,9 @@ def run_fire_cli(args, topic, launch_cwd, ap):
     # LLM lenses report None here -> honest "age unknown".
     age = record.get("newest_item_age_hours")
     prov = _import_sibling("provenance").provenance_record(
-        source, topic, items, newest_item_age_hours=age
+        source, topic, items, newest_item_age_hours=age,
+        self_sourced=record.get("self_sourced", False),
+        self_sourced_items=record.get("self_sourced_items", 0),
     )
     provenance_rows.append(prov)
 
@@ -2131,6 +2153,12 @@ def main():
             newest_item_age_hours=(
                 manifest["channels"].get(c.name) or {}
             ).get("newest_item_age_hours"),
+            self_sourced=(
+                manifest["channels"].get(c.name) or {}
+            ).get("self_sourced", False),
+            self_sourced_items=(
+                manifest["channels"].get(c.name) or {}
+            ).get("self_sourced_items", 0),
         )
         for c in live
     ]

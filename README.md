@@ -24,7 +24,7 @@ to start, but that is a property, not the argument.
 ## One-command install
 
 ```bash
-npx -y zbs-researcher@latest
+npx -y @zbs-gg/zbs-researcher@latest
 ```
 
 No node — the same two commands the installer runs (node not required):
@@ -70,7 +70,7 @@ docs/assets/persona-hello.png and uncomment:
 
 ## Tiers at a glance
 
-- **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket,
+- **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket, YouTube *(needs `yt-dlp`)*,
   GitHub, github-issues, Reddit, Bluesky, launch-radar, revenue-radar.
 - **Tier 1 — your own keys**: LLM lenses Gemini / Grok / Perplexity.
 - **Tier 2 — one OpenRouter key**: all three default LLM lenses at once.
@@ -89,7 +89,7 @@ triangulates a topic across reasoning-model lenses **and** raw platform
 signal, then synthesizes the contradictions — not just the top-ranked
 summary.
 
-Unlike a single web search, it pulls in parallel from up to **17 connectors**
+Unlike a single web search, it pulls in parallel from up to **18 connectors**
 and, crucially, **produces a research plan before it runs** and **does not
 bill Anthropic or OpenAI APIs by default**.
 
@@ -106,6 +106,11 @@ bill Anthropic or OpenAI APIs by default**.
   LLM won't: HN points, Polymarket odds, GitHub stars/velocity, and a
   **hiring-signal** (how many "Who is hiring?" postings mention your topic —
   a cheap read on whether a skill/trend is heating up).
+- **It reads what was said, not what was tagged.** The YouTube channel opens
+  videos and takes the caption track — and when the captions are missing or
+  too poor to quote, it transcribes the audio itself (locally at $0 on Apple
+  silicon, or via Groq/OpenRouter). A web index only ever sees the title and
+  description, so that transcript is evidence no index holds.
 - **Shareable HTML brief.** Renders a self-contained dark-mode `brief.html`.
 
 ## Connectors
@@ -123,6 +128,7 @@ bill Anthropic or OpenAI APIs by default**.
 | github-issues | direct | free | top issues by reactions + comment excerpts |
 | reddit | direct | free* | top posts via Arctic-Shift archive — real score+comments *(best-effort)* |
 | bluesky | direct | free* | top posts *(best-effort)* |
+| youtube | direct | free *(needs `yt-dlp`)* | what was **said** in videos — human captions when they exist, our own transcription when they don't |
 | launch-radar | direct | free (PH slice: free token) | what's shipping — Show HN + yc-oss + DevHunt momentum + category velocity |
 | revenue-radar | direct | free | what's selling — Flippa sold prices + Substack bestseller tiers |
 | meta-ads | direct | free Meta token | who's paying to advertise — Meta Ad Library (EU scope) |
@@ -131,7 +137,7 @@ bill Anthropic or OpenAI APIs by default**.
 | threads | direct | *(key-gated)* free official token or pay-per-use vendor | Threads posts by keyword — official keeps Meta's TOP order, vendor adds engagement counts |
 
 Free direct channels are zero-config; one OpenRouter key (Tier 2) can drive
-all three default LLM lenses at once. LLM channels activate when their key is
+all three default LLM lenses at once — and now transcription too. LLM channels activate when their key is
 present. See [CONFIGURATION.md](CONFIGURATION.md).
 
 A full **"what it sends where"** breakdown — per-connector endpoints, what

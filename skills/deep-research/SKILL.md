@@ -53,7 +53,7 @@ then the run."*
    - is this a **skills/tech-trend** question? → the **hiring** channel shows
      whether the job market is heating up on it (resolve the query to 1–2
      sharp terms, e.g. `RAG`, `context engineering`, not a long phrase)
-3. **Pick channels + aim each one.** Decide which of the 17 connectors run
+3. **Pick channels + aim each one.** Decide which of the 18 connectors run
    and *why each* — which channel covers which facet. Write a per-channel
    query where the default topic string isn't the sharpest aim.
 4. **Name the contradictions you expect to test** — the value of the run is
@@ -128,7 +128,7 @@ Budget rule: **don't burn Anthropic or OpenAI API keys.** So:
 - If you genuinely want a GPT lens without per-token spend, run it **through
   Codex** (flat subscription) interactively — not from this script.
 
-## Architecture — 17 connectors
+## Architecture — 18 connectors
 
 **LLM channels** (need an API key; each is a reasoning model with its own
 live web access):
@@ -152,6 +152,7 @@ odds, velocity; free and zero-config except the last three gated ones):
 | **github-issues** | issue + comment search (`gh`) | top issues by reactions + real comment excerpts — product/competitor evidence; `owner/repo` query scopes to one repo |
 | **reddit** | Arctic-Shift archive (free) | reaction-weighted posts — real score+comments, relevance-ranked *(search.json is dead; degrades to ERROR.md)* |
 | **bluesky** | app.bsky searchPosts | top posts *(best-effort)* |
+| **youtube** *(needs yt-dlp)* | `ytsearch` + caption tracks, own transcription as fallback | what was actually SAID — human captions when they exist, our own Whisper pass when they don't; a web index only reads titles and descriptions |
 | **launch-radar** | Show HN + yc-oss + DevHunt (+Product Hunt with free read token) | what's shipping — momentum-ranked launches (votes × recency decay × comments) + category velocity (saturation signal); YC entries are recency-only (no vote fields) |
 | **revenue-radar** | Flippa sold listings + Substack leaderboards (free) | what's selling — realized sale prices with profit multiples (Flippa→microsaas) + bestseller tiers verbatim, never invented revenue (Substack→infoproducts) |
 | **meta-ads** | Meta Ad Library, EU scope (free token; auto-skipped without one) | who's PAYING to advertise the topic — active ads, advertisers, durations |
@@ -304,6 +305,7 @@ keyword engines — aim each at what it answers best:
 | **telegram** | exact channel names / the terms those channels actually use |
 | **gemini** | talk/video phrasing — `conference talk 2026 <topic> lessons` |
 | **hackernews / github / bluesky** | 1–3 sharp terms, the entity's real name |
+| **youtube** | a talk/demo phrasing (`<entity> production postmortem`), or paste the video URL directly to drill one video |
 
 Allocate the run first (the STEP 0 allocation — `--allocate-run`), then
 write the composed queries into `research-plan.md` inside the run BEFORE
@@ -385,7 +387,12 @@ and every upgrade must be earned by a real result shown first.
 **STEP 0 — read detected state.** A SessionStart hook (wired in the plugin
 root's `hooks/hooks.json`) injects JSON produced by `scripts/detect_state.py`:
 `{providers: {gemini, grok, perplexity, openrouter, scrapecreators, groq,
-threads}, telegram_session, profile, wizard_done, tier, persona}`. If no hook context is present
+threads}, telegram_session, profile, wizard_done, tier, persona,
+hardware: {os, arch, apple_silicon, ram_gb, cpu_count, chip},
+local_media: {mlx_whisper, yt_dlp, transcribe_route, recommendation}}`.
+The `hardware`/`local_media` blocks exist so the transcription step below can
+offer the FREE local route on a machine that can actually run it, instead of
+only ever pitching a paid cloud key. If no hook context is present
 (Codex, Cursor, and other hosts without plugin hooks), run the detector
 yourself and parse its JSON — detection must be host-portable, not just the
 dialogue:
@@ -499,9 +506,39 @@ The full provider → env-var → key-file → where-to-get-it table lives in
   `DEEP_RESEARCH_TIKTOK_VENDOR` (`scrapecreators` default; `apify` needs
   `APIFY_TOKEN`); run it with `--only tiktok-ig` — every run costs vendor
   credits and the report header says so. Video transcription uses the media
-  backend: the default `client` profile needs `GROQ_API_KEY` + `GEMINI_API_KEY`
-  (cloud, cents), while `DEEP_RESEARCH_PROFILE=self` runs local MLX Whisper at
-  $0 (Mac-bound) — name the free local option, not just the paid keys.
+  backend — see the transcription step below; name the free local option, not
+  just the paid keys.
+- **YouTube**: free, no key. Needs `yt-dlp` on the machine (`brew install
+  yt-dlp` / `pip install yt-dlp`) — optional on purpose, and `local_media.yt_dlp`
+  in the detected state says whether it is already there. Without it the channel
+  writes `youtube.ERROR.md` with install guidance; every other channel is
+  unaffected. Say plainly what it buys: this channel reads **what was said in
+  the video**, and when YouTube's captions are missing or too poor to quote it
+  transcribes the audio itself — evidence a web-index researcher cannot reach.
+
+**Transcription route — ask ONCE, only when a media channel is about to
+run.** Never a cold upsell: raise it the first time `youtube` or `tiktok-ig` is
+actually in play. Read `hardware` + `local_media` from the detected state and
+lead with whichever option is genuinely best for THIS machine.
+
+- `recommendation: "capable"` (Apple silicon, ≥16 GB) → lead with local: name
+  the actual chip and RAM so the offer is concrete, e.g. "your M4 Max with
+  64 GB runs `whisper-large-v3-turbo` locally at $0, and no audio leaves the
+  machine — `pip install mlx-whisper`". Mention the cloud routes second.
+- `recommendation: "tight"` (≥8 GB) → local works with a smaller model; say so
+  honestly rather than promising the large one.
+- `recommendation: "cloud"` (not Apple silicon, or too little memory) → do not
+  offer local at all. Offer Groq (free tier ≈2,000 requests/day, then roughly
+  $0.04 per hour of audio, `GROQ_API_KEY` from console.groq.com/keys) or
+  OpenRouter (`OPENROUTER_API_KEY` — the same Tier-2 key that already routes
+  the LLM lenses now covers transcription too).
+
+Persist the answer as `"transcribe": "local" | "groq" | "openrouter"` in
+`<secrets-dir>/onboarding.json`; the media backend reads it on the next run.
+Markers without the field keep working — the route is then derived from the
+profile and the configured keys. `DEEP_RESEARCH_TRANSCRIBE_BACKEND` overrides
+it for one run without touching the marker. Prove it took with `--diagnose`,
+which prints the machine and the route that will actually be used.
 - **Threads**: two honest routes, pick one. Token-gated official API — free,
   2,200 queries/day, but Standard Access searches only your own posts
   (Advanced Access via App Review, ~1–2 weeks, unlocks public search) and
@@ -523,7 +560,8 @@ python3 "$SKILL_DIR/scripts/deep-research.py" --diagnose
 Then write the onboarding marker `<secrets-dir>/onboarding.json` =
 `{"wizard_done": true, "tier": "<highest unlocked>",
 "persona": {"gender": "<f|m|neutral>", "tone": "<business|zbs|neutral|free
-text>"}}`, where the secrets dir is `DEEP_RESEARCH_SECRETS_DIR` or
+text>"}, "transcribe": "<local|groq|openrouter>"}` — include `transcribe` only
+if the transcription step actually ran, where the secrets dir is `DEEP_RESEARCH_SECRETS_DIR` or
 `~/.config/zbs-researcher/secrets`. Use the STEP-2.5 answers; if they were skipped or never
 reached, write the defaults `{"gender": "neutral", "tone": "business"}`.
 `detect_state` and `--diagnose` surface the persona; old markers without it
@@ -639,6 +677,7 @@ A **complete skill-authored bundle** is self-contained:
 ├── github-issues.md      — top issues by reactions + comment excerpts
 ├── reddit.md             — top posts (or ERROR.md)
 ├── bluesky.md            — top posts (or ERROR.md)
+├── youtube.md            — what was SAID in videos: captions, or our own transcription
 ├── launch-radar.md       — what's shipping: momentum-ranked launches + category velocity
 ├── revenue-radar.md      — what's selling: Flippa sold prices + Substack bestseller tiers
 ├── telegram.md           — Telegram channel posts + comments (opt-in, ack-gated)
@@ -665,7 +704,8 @@ caller requested it. Probe and render-only modes allocate no research run.
 
 ## Limits
 
-- **Gemini** grounding sometimes returns plain web, not YouTube. For strictly YouTube, append `site:youtube.com`.
+- **Gemini** grounding sometimes returns plain web, not YouTube. For strictly YouTube, append `site:youtube.com` — or use the **youtube** channel, which opens the videos instead of describing them.
+- **YouTube** needs `yt-dlp` installed; without it the channel writes `youtube.ERROR.md` and its neighbours are unaffected. It cannot be replaced with a plain HTTP call: YouTube's `timedtext` endpoint is PoToken-gated and returns an empty body to unauthenticated programmatic requests. Per run it opens the top 5 matches, transcribes at most 3, and stops at an 8-minute wall clock (`DEEP_RESEARCH_YOUTUBE_READ_TOP` / `_TRANSCRIBE_TOP` / `_DEADLINE`); anything a budget dropped is stated in the report. Audio over 25 MB, live streams, and videos with no known duration are **refused rather than partly transcribed** — half a talk presented as the whole one is worse than no transcript. Non-English videos usually go straight to transcription — set `DEEP_RESEARCH_YOUTUBE_SUB_LANGS` to try that language's captions first. When a transcript is produced, the report names the route it used, because that is the difference between $0 locally and a charge on your key.
 - **Grok** X search caps ~25 posts/query — reformulate for deeper passes.
 - **OpenAI/Perplexity** sometimes miss small niche communities — enumerate exact subreddits/orgs/domains in the query.
 - **Polymarket** only fires for forecastable topics; honest "no markets matched" otherwise (uses real `/public-search`, not top-100-by-volume).
