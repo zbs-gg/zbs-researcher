@@ -323,6 +323,27 @@ class TestYouTubeCoverage(unittest.TestCase):
             4,
         )
 
+    def test_a_platforms_own_docs_are_not_that_platforms_conversation(self):
+        """Caught while scoring a real opponent: help.x.com counted as
+        "reached X natively". A help centre is a corporate publication a web
+        index has in full — crediting it would score reading the manual as
+        reading the room. (This lowers an opponent's number, which is why the
+        reasoning has to stand on its own.)"""
+        for host in ("https://help.x.com/en/using-x/x-timeline",
+                     "https://developer.x.com/en/docs",
+                     "https://blog.x.com/en_us/topics",
+                     "https://support.reddit.com/hc/en-us"):
+            with self.subTest(host=host):
+                self.assertEqual(eval_harness.score_social_coverage([host]), 0, host)
+
+    def test_the_real_platform_hosts_still_count(self):
+        self.assertEqual(
+            eval_harness.score_social_coverage(
+                ["https://x.com/a/status/1", "https://old.reddit.com/r/x/comments/2"]
+            ),
+            2,
+        )
+
     def test_fully_indexed_forums_still_earn_nothing(self):
         self.assertEqual(
             eval_harness.score_social_coverage(
@@ -438,6 +459,43 @@ class TestParallelBaseline(unittest.TestCase):
             scores, _ = self._run(tmp, result)
         self.assertEqual(scores["depth"], 3)
         self.assertEqual(scores["social_coverage"], 2)
+
+    def test_the_live_excerpts_field_is_not_dropped(self):
+        """Regression, caught in a real duel: the API sends `excerpts` (a
+        list). Reading only a singular `excerpt` silently threw away every
+        quote the opponent supplied and scored it at zero depth — which would
+        have published a rigged benchmark."""
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{
+                    "citations": [
+                        {"url": "https://help.x.com/en/using-x/x-timeline",
+                         "excerpts": ["For you serves posts from accounts and "
+                                      "Topics you follow as well as recommended posts."]},
+                        {"url": "https://help.x.com/en/rules-and-policies/x-limits",
+                         "excerpts": ["Posts: 50 original posts and 200 replies per day.",
+                                      "Direct Messages daily limit is 500 messages sent."]},
+                    ]
+                }],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 2)
+
+    def test_a_citation_with_no_excerpt_is_a_pointer_not_evidence(self):
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{"citations": [
+                    {"url": "https://help.x.com/en/using-x/x-timeline", "excerpts": []},
+                ]}],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 0)
 
     def test_missing_key_is_honest_and_makes_no_call(self):
         def boom(*args, **kwargs):
