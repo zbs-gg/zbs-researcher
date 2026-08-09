@@ -271,6 +271,33 @@ not the argument). On compounding, say it straight: connect Cartographer
 across runs; without it, feedback is a local save the next run reads —
 useful, not learning.
 
+### STEP I-1 — DECOMPOSE the question the person actually asked
+
+**Take the question as given. Do not hand it back for rewriting.** People
+arrive with "how do I run a Twitter account now" — vague, no entities, no
+timeframe — and turning that into something researchable is the job, not a
+prerequisite for it. A tool that needs a well-formed query is a search box.
+
+Decompose it before composing anything:
+
+- **What is the person actually deciding?** "How to run X now" is someone about
+  to spend months posting. That makes the cost of a stale answer high and the
+  value of a hedge low.
+- **Split into a then / now / what-changed shape.** How was this done before,
+  what is done today, and what specifically broke in between. The delta is
+  usually the answer — and it is exactly what an assistant quoting old
+  articles cannot see.
+- **Name the concrete entities the vague words hide** — the platforms, the
+  features, the mechanisms, the people who would know. Those become the
+  target-scoped queries in STEP I1.
+- **Write down what would change the answer**: an algorithm change, a policy
+  change, a monetization change. Those are the things to go hunting for.
+
+**Ask the person a question only when an assumption would change the whole
+answer** — the market and language they are working in, say, or whether they
+want reach or revenue. One blocking question at most, then proceed on a stated
+assumption. Interrogating them instead of researching is its own failure.
+
 ### STEP I0 — read prior feedback for this topic
 
 Before composing anything, check what earlier runs on this topic left
@@ -345,13 +372,56 @@ Compose targeted follow-ups and fire again — problem-hunting lives on
   coverage. The free channels (hackernews, github, github-issues, reddit,
   bluesky) carry the breadth.
 
+### STEP I3.5 — DATE AND GRADE EVERY CLAIM (mandatory, before writing)
+
+**The failure this step exists to prevent, observed in the wild:** asked how
+to run an X account *now*, a well-known assistant confidently quoted
+engagement coefficients from 2023 articles. The numbers had since been shown
+to be invented, and the ranking model had changed twice. Nothing in the answer
+hinted at any of it. Sounding current is not being current, and on a fast
+platform a stale answer is worse than no answer — it gets acted on.
+
+So before writing anything, go through the collected claims and attach two
+things to each:
+
+**1. A date — of the FACT, not of the page.** When did this become true, and is
+there any sign it stopped? A 2026 article restating a 2023 claim is a 2023
+claim. Prefer the moment the platform changed something over the moment
+someone blogged about it.
+
+**2. A proof tier, printed in the report next to the claim:**
+
+| Tier | What it is |
+|---|---|
+| **T1 — primary** | The platform itself: documentation, an official announcement, the open-sourced ranking code, a dated post by someone who actually did it |
+| **T2 — first-hand numbers** | An identifiable account reporting their own measured result, with figures and a date |
+| **T3 — informed opinion** | An identifiable practitioner's read, no numbers |
+| **T4 — unsupported** | Clickbait, no author, no date, "the algorithm loves X" with nothing behind it. **Cite T4 only to knock it down** — never as support for anything |
+
+**The staleness rule:** a claim older than **12 months** with no fresh
+confirmation **cannot be load-bearing**. Either re-confirm it against a T1/T2
+source dated inside the window, or move it into the stale section below. This
+rule binds even when the claim is repeated everywhere — *especially* then,
+because that is exactly how a dead fact survives.
+
 ### STEP I4 — SYNTHESIZE the problems-first report
 
 Write the landscape report as `synthesis.md` in the run dir. Structure:
-**the landscape → where the problems are → top unsolved problems.** Every
-load-bearing claim carries a real quote + author handle + clickable link
-to the live primary thread — a claim without those is not load-bearing;
+**the landscape → where the problems are → what people repeat that is no
+longer true → top unsolved problems.** Every load-bearing claim carries a real
+quote + author handle + clickable link to the live primary thread, plus its
+tier and date from STEP I3.5 — a claim without those is not load-bearing;
 demote or drop it.
+
+**The "no longer true" section is not optional.** For each entry: what people
+say, when it WAS true, what changed it, and the dated source proving the
+change. If the run genuinely found nothing stale, write that in one line —
+"nothing load-bearing turned out to be stale" is a real finding, and inventing
+a takedown to look thorough is worse than not having one.
+
+**Say what you could not settle.** A question the evidence does not answer
+belongs in the report as an open question, not smoothed over. The reader is
+deciding what to do; a confident guess costs them more than an admission.
 
 ### STEP I5 — COVERAGE-RECEIPTS + FEEDBACK
 
