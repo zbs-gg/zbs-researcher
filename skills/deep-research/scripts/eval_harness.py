@@ -178,6 +178,15 @@ def score_freshness(ages_hours):
     return (known[mid - 1] + known[mid]) / 2.0
 
 
+# A platform's own documentation is not that platform's conversation.
+# help.x.com is a corporate publication a web index has in full; counting it
+# as "reached X natively" would credit reading the manual as reading the room.
+_CORPORATE_SUBDOMAINS = frozenset({
+    "help", "support", "about", "blog", "docs", "developer", "developers",
+    "business", "status", "legal", "policy", "press", "careers", "investor",
+})
+
+
 def _platforms_for(source):
     """Map one source token (connector name, domain, or URL) to the native
     platform(s) it reaches; () for plain web pages."""
@@ -187,6 +196,9 @@ def _platforms_for(source):
     token = token.split("/", 1)[0]
     if token.startswith("www."):
         token = token[4:]
+    head = token.split(".", 1)[0]
+    if "." in token and head in _CORPORATE_SUBDOMAINS:
+        return ()
     candidates = [token]
     if "." in token:  # subdomain hosts (old.reddit.com) match their tail
         candidates.append(".".join(token.split(".")[-2:]))
@@ -461,13 +473,35 @@ def _parallel_text(result):
             if not isinstance(citation, dict):
                 continue
             url = citation.get("url")
-            excerpt = (citation.get("excerpt") or "").strip()
-            if url:
-                # Put the excerpt on the line under the link: that is the shape
-                # extract_evidence looks for, so a cited quote counts for
-                # Parallel exactly as it does for us.
-                parts.append(f"- {url}\n  \"{excerpt}\"" if excerpt else f"- {url}")
+            if not url:
+                continue
+            # The live API returns `excerpts` (a LIST). Reading only a singular
+            # `excerpt` silently dropped every quote the opponent supplied and
+            # scored them at zero depth — a rigged benchmark. Accept both.
+            for excerpt in _citation_excerpts(citation):
+                parts.append(f"- {url}\n  \"{excerpt}\"")
+            if not _citation_excerpts(citation):
+                parts.append(f"- {url}")
     return "\n".join(parts)
+
+
+def _citation_excerpts(citation):
+    """Quoted excerpts attached to one citation, whatever shape they arrive in.
+
+    Parallel sends `excerpts: [...]`; a singular `excerpt` string is accepted
+    too so neither spelling is silently ignored.
+    """
+    raw = citation.get("excerpts")
+    if isinstance(raw, str):
+        candidates = [raw]
+    elif isinstance(raw, (list, tuple)):
+        candidates = list(raw)
+    else:
+        candidates = []
+    single = citation.get("excerpt")
+    if isinstance(single, str):
+        candidates.append(single)
+    return [" ".join(str(c).split()) for c in candidates if str(c).strip()]
 
 
 def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
