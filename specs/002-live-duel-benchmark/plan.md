@@ -64,12 +64,13 @@ all official attempts within a frozen 24-hour window
   `run-parallel` remains a preflight unless `--confirm-paid` is supplied, and
   tests inject a fake executor.
 - **Portable and Graceful Execution — PASS**: stdlib only, no shell/process
-  dependency, portable relative paths, and explicit technical-failure records.
+  dependency, portable relative paths, total wall-clock deadlines for paid HTTP
+  reads, and explicit technical-failure/cost-unavailable records.
 - **Plan, Test, Review — PASS**: living spec/design/tasks, focused contract and
   end-to-end tests, full suite/selftest, analyze, converge, and diff review.
 - **Runtime and privacy constraints — PASS**: runtime is explicit, ignored,
-  private, sanitized, and never uploaded; the public tree contains synthetic
-  fixtures only.
+  private at every directory level, sanitized, and never uploaded; the public
+  tree contains synthetic fixtures only.
 
 ## Project Structure
 

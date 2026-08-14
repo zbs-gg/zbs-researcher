@@ -116,3 +116,19 @@ and would not prove a human reviewed the changed terms.
 All gates remain passed. No design adds an implicit provider, live test,
 credential persistence, public answer artifact, personal absolute path, monid
 lookup, or automated publication/merge.
+
+## Decision 9: Bound paid reads and reconcile unknown charges
+
+**Decision**: Treat each connector HTTP timeout as a total wall-clock deadline,
+retain an atomic private timeout receipt, and require every paid Researcher call
+to carry a unique ID plus an actual, estimated, or unavailable cost state. An
+unavailable provider amount needs one conservative USD reconciliation entry
+before the run can be snapshotted.
+
+**Rationale**: A socket-level timeout can be renewed indefinitely by partial
+traffic, and treating an unknown charge as zero would let paid work bypass the
+USD 10 experiment cap.
+
+**Alternatives considered**: Unix signals or child-process termination violate
+the portable stdlib contract; accepting an unknown amount without a reserve
+makes the budget unverifiable.

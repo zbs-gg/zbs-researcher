@@ -141,3 +141,10 @@ veto, three-win, 2-2-1 tie, cost/time separation, and partial-report refusal.
 - Every task names its owned files and follows the strict Spec Kit checklist format.
 - Runtime answers and Telegram materials never enter version control.
 - No task authorizes merge, publication, official live runs, or monid integration.
+
+## Phase 7: Convergence
+
+- [x] T023 CRITICAL add a portable total wall-clock deadline for paid `--fire` calls and atomically retain an automatic error/cost-unknown receipt after timeout in `skills/deep-research/scripts/deep-research.py`, `skills/deep-research/scripts/fire_audit.py`, and `skills/deep-research/tests/test_fire.py` per Constitution IV (partial)
+- [x] T024 Reconcile every paid Researcher `manifest.calls[]` entry with an actual, estimated, or explicitly unavailable cost receipt before snapshot acceptance, and test that unaccounted spend cannot bypass the USD 10 cap in `skills/deep-research/scripts/duel_benchmark.py` and `skills/deep-research/tests/test_duel_benchmark.py` per FR-011 and FR-012 (partial)
+- [x] T025 Replace audit completion booleans with a validated claim-level ledger that records each load-bearing claim, citation-fit verdict, fact date/freshness, support status, and evidence note while preserving recommendation/omission/contradiction and critical-error review in `skills/deep-research/scripts/duel_benchmark.py` and `skills/deep-research/tests/test_duel_benchmark.py` per FR-015 (partial)
+- [x] T026 Ensure every benchmark runtime directory, including the implicit `questions/` parent, is mode `0700` on POSIX and extend the end-to-end privacy scan in `skills/deep-research/scripts/duel_benchmark.py` and `skills/deep-research/tests/test_duel_benchmark.py` per plan: private storage (partial)

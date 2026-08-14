@@ -355,7 +355,14 @@ provenance}`: read it, open `path` for the evidence, keep `provenance` —
 it feeds the coverage-receipts. A failing channel degrades to an
 `.ERROR.md` twin with `status: "error"`; the envelope tells you, the exit
 code stays 0. Repeated fires into the same `--output-dir` accumulate one
-`manifest.json`.
+`manifest.json`. Each fire appends a call receipt with the requested source,
+actual provider route, query, status, timing, and real vendor usage when it is
+available. Its cost receipt is `actual`, `estimated`, or explicitly
+`unavailable`; unknown cost is never silently treated as zero. HTTP bodies use
+one total wall-clock deadline, so a provider that keeps a socket alive cannot
+hold a paid fire forever. A timeout leaves a private atomic error artifact and
+call receipt. Fires targeting the same run are serialized across processes so
+neither the raw answer nor its receipt can be overwritten by a concurrent call.
 
 ### STEP I3 — READ + DRILL (bounded)
 

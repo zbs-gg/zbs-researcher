@@ -240,12 +240,19 @@ python3 "$SCRIPT" --feedback "grok was gold, reddit stale" --topic "agent memory
 ```
 
 Repeated fires into the same `--output-dir` accumulate one `manifest.json`
-with a provenance record per fire — the coverage-receipts source. The
-feedback note is saved locally to inform the next run on the topic (relayed
-to a Cartographer install only when you connect one — it is never described
-as "learned"). The full playbook (compose table, drill bounds, paid-lens
-budget) lives in the skill's INVESTIGATE MODE section; the knobs and the
-eval harness are in [CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
+with a provenance record and call receipt per fire — including the provider
+route, timing, real vendor usage when returned, and an explicit actual,
+estimated, or unavailable cost state. HTTP response bodies obey the connector's
+total wall-clock deadline; a timeout leaves an atomic private error receipt
+instead of an indefinitely open paid call. One run directory accepts only one
+active fire at a time; the cross-process lock prevents a slow paid call from
+being overwritten by a second operator. The manifest is replaced atomically
+with owner-only permissions. The feedback note is saved locally to
+inform the next run on the topic (relayed to a Cartographer install only when
+you connect one — it is never described as "learned"). The full playbook
+(compose table, drill bounds, paid-lens budget) lives in the skill's
+INVESTIGATE MODE section; the knobs and the eval harness are in
+[CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
 
 Before it searches, investigate decomposes the person's broad question into
 the decision, the then/now delta, the hidden entities, and the changes that
@@ -299,7 +306,13 @@ suite approval, price check, or previous question never grants reusable consent.
 Only a recorded technical failure permits `--retry-technical`, and every attempt
 is preserved. Runtime bundles stay in ignored `research/` with private atomic
 files; questions, rubric, code, and synthetic tests are the only committed data.
-The first result is internal and the tool never publishes or merges it.
+Before a Researcher snapshot is accepted, every paid `manifest.calls[]` receipt
+must carry an actual or estimated USD amount, or an unavailable state reconciled
+to a conservative USD cost entry by `call_id`; all such amounts count toward the
+USD 10 cap. Each AI audit uses a claim ledger with citation-fit, fact date,
+freshness, support status, and evidence note rather than three unchecked
+completion flags. The first result is internal and the tool never publishes or
+merges it.
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`

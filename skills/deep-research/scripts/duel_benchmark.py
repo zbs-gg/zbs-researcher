@@ -30,6 +30,18 @@ RUBRIC_DIMENSIONS = (
     "freshness",
     "uncertainty_honesty",
 )
+PAID_RESEARCHER_SOURCES = {
+    "gemini", "grok", "openai", "perplexity", "tiktok-ig",
+}
+PAID_RESEARCHER_PROVIDERS = {
+    "anthropic", "apify", "gemini", "google", "openai", "openrouter",
+    "perplexity", "scrapecreators", "xai",
+}
+AUDIT_CITATION_FIT = {"supports", "partial", "does_not_support", "not_applicable"}
+AUDIT_FRESHNESS = {"current", "stale", "undated", "not_applicable"}
+AUDIT_SUPPORT_STATUS = {
+    "verified", "bounded_inference", "unsupported", "contradicted",
+}
 
 
 def _load_eval_harness():
@@ -87,8 +99,17 @@ def _digest_file(path):
 
 def _ensure_private_dir(path):
     path = Path(path)
+    missing = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        if cursor.parent == cursor:
+            break
+        cursor = cursor.parent
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix":
+        for created in reversed(missing):
+            os.chmod(created, 0o700)
         os.chmod(path, 0o700)
     return path
 
@@ -323,8 +344,9 @@ def init_bundle(suite_path=DEFAULT_SUITE, bundle_dir=None, *, repo_root=REPO_ROO
     }
     write_private_json(bundle_dir / "suite.json", frozen)
     write_private_json(bundle_dir / "preflight.json", preflight)
+    questions_dir = _ensure_private_dir(bundle_dir / "questions")
     for question in suite["questions"]:
-        qdir = _ensure_private_dir(bundle_dir / "questions" / question["id"])
+        qdir = _ensure_private_dir(questions_dir / question["id"])
         write_private_json(qdir / "question.json", question)
     write_private_json(bundle_dir / "bundle.json", metadata)
     return metadata
@@ -403,6 +425,111 @@ def _duration_from_manifest(manifest):
         )
     except BenchmarkError:
         return None
+
+
+def _paid_researcher_call(call):
+    cost_class = call.get("cost_class")
+    source = str(call.get("source") or "").lower()
+    provider = str(call.get("provider") or "").lower()
+    return (
+        cost_class == "paid"
+        or source in PAID_RESEARCHER_SOURCES
+        or provider in PAID_RESEARCHER_PROVIDERS
+    )
+
+
+def _validate_cost_entry(item):
+    if not isinstance(item, dict):
+        raise BenchmarkError("each Researcher cost entry must be an object")
+    amount = item.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0:
+        raise BenchmarkError("each Researcher cost entry needs a non-negative amount")
+    if item.get("currency") != "USD" or not item.get("provider") or not item.get("basis"):
+        raise BenchmarkError(
+            "each Researcher paid call must record provider, USD currency, and basis"
+        )
+    status = item.get("status")
+    if status is not None and status not in {"actual", "estimated", "unavailable"}:
+        raise BenchmarkError("Researcher cost status must be actual, estimated, or unavailable")
+
+
+def _reconcile_researcher_costs(manifest):
+    """Account for every paid fire without letting unknown charges evade the cap."""
+    costs = manifest.get("costs") or []
+    if not isinstance(costs, list):
+        raise BenchmarkError("Researcher manifest costs must be a list")
+    for item in costs:
+        _validate_cost_entry(item)
+
+    calls = manifest.get("calls") or []
+    if not isinstance(calls, list):
+        raise BenchmarkError("Researcher manifest calls must be a list")
+    paid_calls = {}
+    inline_costs = []
+    unavailable_ids = set()
+    for index, call in enumerate(calls, start=1):
+        if not isinstance(call, dict):
+            raise BenchmarkError("each Researcher call receipt must be an object")
+        if not _paid_researcher_call(call):
+            continue
+        call_id = str(call.get("call_id") or "").strip()
+        if not call_id:
+            raise BenchmarkError(f"paid Researcher call {index} is missing call_id")
+        if call_id in paid_calls:
+            raise BenchmarkError(f"duplicate paid Researcher call_id: {call_id}")
+        paid_calls[call_id] = call
+        receipt = call.get("cost_receipt")
+        if not isinstance(receipt, dict):
+            raise BenchmarkError(f"paid Researcher call {call_id} has no cost receipt")
+        status = receipt.get("status")
+        if status not in {"actual", "estimated", "unavailable"}:
+            raise BenchmarkError(f"paid Researcher call {call_id} has invalid cost status")
+        if receipt.get("currency") != "USD" or not str(receipt.get("basis") or "").strip():
+            raise BenchmarkError(f"paid Researcher call {call_id} needs USD and a cost basis")
+        amount = receipt.get("amount")
+        if status in {"actual", "estimated"}:
+            if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0:
+                raise BenchmarkError(f"paid Researcher call {call_id} needs a non-negative cost")
+            inline_costs.append({
+                "provider": str(call.get("provider") or call.get("source") or "unknown"),
+                "amount": float(amount),
+                "currency": "USD",
+                "basis": str(receipt["basis"]),
+                "status": status,
+                "call_ids": [call_id],
+            })
+        else:
+            if amount is not None:
+                raise BenchmarkError(
+                    f"unavailable paid Researcher call {call_id} must not claim an amount"
+                )
+            unavailable_ids.add(call_id)
+
+    covered = set()
+    for item in costs:
+        call_ids = item.get("call_ids") or []
+        if not isinstance(call_ids, list) or any(
+            not isinstance(value, str) or not value.strip() for value in call_ids
+        ):
+            raise BenchmarkError("Researcher cost call_ids must be a list of IDs")
+        for call_id in call_ids:
+            if call_id not in paid_calls:
+                raise BenchmarkError(f"Researcher cost references unknown paid call: {call_id}")
+            if call_id not in unavailable_ids:
+                raise BenchmarkError(f"paid Researcher call {call_id} is accounted twice")
+            if call_id in covered:
+                raise BenchmarkError(f"paid Researcher call {call_id} is reconciled twice")
+            covered.add(call_id)
+    missing = sorted(unavailable_ids - covered)
+    if missing:
+        raise BenchmarkError(
+            "unaccounted paid call(s): " + ", ".join(missing)
+            + "; add a conservative USD cost entry with call_ids"
+        )
+
+    normalized = [dict(item) for item in costs] + inline_costs
+    total = sum(float(item["amount"]) for item in normalized)
+    return normalized, total, len(paid_calls)
 
 
 def snapshot_researcher(bundle_dir, question_id, run_dir, *, now=None,
@@ -500,21 +627,7 @@ def snapshot_researcher(bundle_dir, question_id, run_dir, *, now=None,
     if not raw_files:
         raise BenchmarkError("Researcher run has no successful raw result")
 
-    costs = manifest.get("costs") or []
-    for item in costs:
-        if not isinstance(item, dict):
-            raise BenchmarkError("each Researcher cost entry must be an object")
-        amount = item.get("amount")
-        if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0:
-            raise BenchmarkError("each Researcher cost entry needs a non-negative amount")
-        if item.get("currency") != "USD" or not item.get("provider") or not item.get("basis"):
-            raise BenchmarkError(
-                "each Researcher paid call must record provider, USD currency, and basis"
-            )
-    reported_total = sum(
-        float(item.get("amount", 0)) for item in costs
-        if isinstance(item, dict) and isinstance(item.get("amount", 0), (int, float))
-    )
+    costs, reported_total, paid_call_count = _reconcile_researcher_costs(manifest)
     if reported_total > float(suite["budgets"]["researcher_max"]):
         raise BenchmarkError("Researcher reported cost exceeds the frozen USD 10 budget")
     prior_total = 0.0
@@ -554,6 +667,7 @@ def snapshot_researcher(bundle_dir, question_id, run_dir, *, now=None,
             "source_plan_present": True,
             "investigate_mode": True,
             "successful_raw_result": True,
+            "paid_calls_reconciled": paid_call_count,
             "max_drill_rounds": suite["researcher"]["max_drill_rounds"],
         },
     }
@@ -724,9 +838,7 @@ def _neutral_answer(text, label):
 
 def _blank_audit(question_id):
     answer = {
-        "load_bearing_claims_checked": False,
-        "citation_fit_checked": False,
-        "freshness_checked": False,
+        "claims": [],
         "unsupported_recommendations": [],
         "omissions": [],
         "contradictions": [],
@@ -737,9 +849,9 @@ def _blank_audit(question_id):
         },
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "question_id": question_id,
-        "complete": False,
+        "status": "pending",
         "answers": {"A": dict(answer), "B": json.loads(json.dumps(answer))},
     }
 
@@ -813,17 +925,54 @@ def blind_question(bundle_dir, question_id, *, rng=None):
 
 
 def _validate_audit(audit):
-    if audit.get("complete") is not True:
+    if audit.get("status") != "complete":
         raise BenchmarkError("AI audit is incomplete")
     for label in ("A", "B"):
         side = (audit.get("answers") or {}).get(label)
         if not isinstance(side, dict):
             raise BenchmarkError(f"AI audit is missing answer {label}")
-        for field in (
-            "load_bearing_claims_checked", "citation_fit_checked", "freshness_checked"
-        ):
-            if side.get(field) is not True:
-                raise BenchmarkError(f"AI audit {label} did not complete {field}")
+        claims = side.get("claims")
+        if not isinstance(claims, list) or not claims:
+            raise BenchmarkError(f"AI audit {label} claim ledger is empty")
+        for index, claim in enumerate(claims, start=1):
+            if not isinstance(claim, dict):
+                raise BenchmarkError(f"AI audit {label} claim {index} must be an object")
+            if not str(claim.get("claim") or "").strip():
+                raise BenchmarkError(f"AI audit {label} claim {index} has no claim text")
+            citations = claim.get("citations")
+            if not isinstance(citations, list) or any(
+                not isinstance(value, str) or not value.strip() for value in citations
+            ):
+                raise BenchmarkError(f"AI audit {label} claim {index} citations must be a list")
+            if claim.get("citation_fit") not in AUDIT_CITATION_FIT:
+                raise BenchmarkError(f"AI audit {label} claim {index} has invalid citation fit")
+            if claim.get("freshness") not in AUDIT_FRESHNESS:
+                raise BenchmarkError(f"AI audit {label} claim {index} has invalid freshness")
+            if claim.get("support_status") not in AUDIT_SUPPORT_STATUS:
+                raise BenchmarkError(f"AI audit {label} claim {index} has invalid support status")
+            fact_date = claim.get("fact_date")
+            if fact_date is not None and not isinstance(fact_date, str):
+                raise BenchmarkError(f"AI audit {label} claim {index} has invalid fact date")
+            if isinstance(fact_date, str):
+                try:
+                    datetime.fromisoformat(fact_date)
+                except ValueError as exc:
+                    raise BenchmarkError(
+                        f"AI audit {label} claim {index} has invalid fact date"
+                    ) from exc
+            freshness = claim.get("freshness")
+            if freshness in {"current", "stale"} and fact_date is None:
+                raise BenchmarkError(
+                    f"AI audit {label} claim {index} freshness needs a fact date"
+                )
+            if freshness in {"undated", "not_applicable"} and fact_date is not None:
+                raise BenchmarkError(
+                    f"AI audit {label} claim {index} fact date conflicts with freshness"
+                )
+            if not str(claim.get("evidence_note") or "").strip():
+                raise BenchmarkError(f"AI audit {label} claim {index} needs an evidence note")
+            if claim.get("citation_fit") == "supports" and not citations:
+                raise BenchmarkError(f"AI audit {label} claim {index} claims support without a citation")
         for field in ("unsupported_recommendations", "omissions", "contradictions"):
             if not isinstance(side.get(field), list):
                 raise BenchmarkError(f"AI audit {label}.{field} must be a list")

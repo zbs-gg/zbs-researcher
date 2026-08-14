@@ -164,6 +164,13 @@ the breadth, paid fires are saved for the leads that matter. A `--fire` on
 a keyless paid source refuses up front, naming the missing keys — no
 surprise paid calls.
 
+Each paid fire has one connector-specific total HTTP wall-clock deadline (60 to
+600 seconds for the current paid routes), not a renewable per-chunk wait. A timeout writes
+an owner-only `.ERROR.md` artifact and atomically appends a call receipt whose
+cost is explicitly unavailable. Before the run can enter the official duel,
+that receipt must be reconciled by `call_id` to a conservative USD amount so an
+unknown provider charge cannot bypass the Researcher budget.
+
 ### Cartographer relay (opt-in)
 
 ```bash
@@ -262,8 +269,18 @@ An incomplete Researcher attempt is preserved with
 completed but disappointing answer and keeps cumulative reported vendor spend
 within the USD 10 Researcher cap.
 
-`blind` writes neutral A/B Markdown, a private mapping, and incomplete audit and
-judgment forms. `report` refuses missing checks or scores, applies the three-
+Every paid `manifest.calls[]` row must have a unique `call_id`, provider,
+`cost_class: "paid"`, and `cost_receipt`. Actual or estimated receipt amounts
+count directly. When the provider exposes no amount, add one `manifest.costs[]`
+entry with its conservative USD accounting amount, basis, status, and
+`call_ids`; snapshots fail closed on missing, duplicate, or unknown coverage.
+
+`blind` writes neutral A/B Markdown, a private mapping, and pending audit and
+judgment forms. A completed audit lists every load-bearing claim with its
+citations, citation-fit verdict, fact date, freshness, support status, and
+evidence note, alongside recommendations, omissions, contradictions, and the
+critical-error review. `report` refuses an empty or invalid ledger or missing
+scores, applies the three-
 point per-question margin and critical-error veto, and requires three question
 wins overall. Objective depth/freshness/social coverage, time, and cost stay
 outside the five quality scores. Runtime paths are relative inside mode-0600

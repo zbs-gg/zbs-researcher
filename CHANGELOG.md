@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Auditable investigate calls.** `--fire` now retains provider routing,
+  timing, token usage, and actual vendor cost fields when available. Paid HTTP
+  reads have a portable total wall-clock deadline; timeouts keep a private
+  atomic error and cost-unavailable receipt. Fires into one run directory are
+  serialized across processes, and the private manifest is replaced atomically,
+  preventing slow paid calls from losing or overwriting each other's receipts.
 - **Private five-question duel controller.** The first official Researcher vs
   Parallel benchmark now has a frozen English suite and `init`,
   `snapshot-researcher`, `run-parallel`, `blind`, and `report` commands. It
@@ -9,6 +15,11 @@
   per-call paid consent, allows only technical retries, and fails closed on
   incomplete blind audits or scores. Runtime answers stay ignored and private;
   nothing is published or merged automatically.
+- **Fail-closed duel accounting and claim audit.** Researcher snapshots now
+  reconcile every paid call receipt to an actual, estimated, or conservative
+  unavailable USD amount before applying the USD 10 cap. Blind audits now use
+  a validated claim ledger with citation fit, fact date, freshness, support
+  status, and an evidence note. Every runtime directory is mode `0700` on POSIX.
 - **Paid Parallel baseline, explicit only.** A stored researcher run can now be
   compared with Parallel's Task API on the same depth, freshness, and native
   social axes. `--baseline parallel` is the only activation path; a configured

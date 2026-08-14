@@ -117,13 +117,19 @@ def _complete_forms(bundle, qid, *, scores_a=None, scores_b=None,
                     critical_a=False, critical_b=False):
     blind = Path(bundle) / "questions" / qid / "blind"
     audit = json.loads((blind / "ai-audit.json").read_text())
-    audit["complete"] = True
+    audit["status"] = "complete"
     for label, critical in (("A", critical_a), ("B", critical_b)):
         side = audit["answers"][label]
         side.update({
-            "load_bearing_claims_checked": True,
-            "citation_fit_checked": True,
-            "freshness_checked": True,
+            "claims": [{
+                "claim": "The answer's central recommendation follows from the cited evidence.",
+                "citations": ["https://example.com/primary"],
+                "citation_fit": "supports",
+                "fact_date": "2026-08-14",
+                "freshness": "current",
+                "support_status": "verified",
+                "evidence_note": "The fixture citation directly supports the decision premise.",
+            }],
             "unsupported_recommendations": [],
             "omissions": [],
             "contradictions": [],
@@ -224,6 +230,8 @@ class TestInit(DuelTestCase):
             for path in self.bundle.rglob("*"):
                 if path.is_file():
                     self.assertEqual(path.stat().st_mode & 0o777, 0o600, path)
+                elif path.is_dir():
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o700, path)
 
     def test_init_never_calls_a_provider(self):
         self.providers["parallel"] = False
@@ -333,6 +341,79 @@ class TestResearcherSnapshot(DuelTestCase):
             else:
                 with self.assertRaisesRegex(duel.BenchmarkError, "cumulative"):
                     duel.snapshot_researcher(self.bundle, "q02", run)
+
+    def test_paid_calls_need_claimed_cost_or_conservative_reconciliation(self):
+        self.init()
+        run = _researcher_run(self.root, FROZEN_QUESTIONS[0])
+        manifest_path = run / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["calls"] = [{
+            "call_id": "call-001",
+            "source": "grok",
+            "provider": "xai",
+            "cost_class": "paid",
+            "status": "error",
+            "cost_receipt": {
+                "status": "unavailable",
+                "amount": None,
+                "currency": "USD",
+                "basis": "provider failed before returning billing metadata",
+            },
+        }]
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(duel.BenchmarkError, "unaccounted paid call"):
+            duel.snapshot_researcher(self.bundle, "q01", run)
+
+        manifest["costs"] = [{
+            "provider": "xai",
+            "amount": 0.25,
+            "currency": "USD",
+            "basis": "conservative reserve after unavailable provider charge",
+            "status": "unavailable",
+            "call_ids": ["call-001"],
+        }]
+        manifest_path.write_text(json.dumps(manifest))
+        receipt = duel.snapshot_researcher(self.bundle, "q01", run)
+        self.assertEqual(receipt["reported_cost_total"], 0.25)
+        self.assertEqual(receipt["validation"]["paid_calls_reconciled"], 1)
+
+    def test_inline_paid_cost_counts_toward_researcher_cap(self):
+        self.init()
+        run = _researcher_run(self.root, FROZEN_QUESTIONS[0])
+        manifest_path = run / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["calls"] = [{
+            "call_id": "call-001",
+            "source": "perplexity",
+            "provider": "openrouter",
+            "cost_class": "paid",
+            "status": "ok",
+            "cost_receipt": {
+                "status": "actual",
+                "amount": 10.01,
+                "currency": "USD",
+                "basis": "provider usage response",
+            },
+        }]
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(duel.BenchmarkError, "USD 10"):
+            duel.snapshot_researcher(self.bundle, "q01", run)
+
+    def test_known_paid_source_cannot_self_declare_as_free(self):
+        self.init()
+        run = _researcher_run(self.root, FROZEN_QUESTIONS[0])
+        manifest_path = run / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["calls"] = [{
+            "call_id": "call-001",
+            "source": "grok",
+            "provider": "xai",
+            "cost_class": "free",
+            "status": "ok",
+        }]
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(duel.BenchmarkError, "cost receipt"):
+            duel.snapshot_researcher(self.bundle, "q01", run)
 
     def test_technical_failure_trace_is_preserved_before_one_success(self):
         self.init()
@@ -500,6 +581,38 @@ class TestBlindAndReport(DuelTestCase):
         with self.assertRaisesRegex(duel.BenchmarkError, "0 to 4"):
             duel.derive_question_result(self.bundle, "q01")
 
+    def test_claim_audit_requires_a_valid_load_bearing_ledger(self):
+        self.init()
+        self._complete_pair()
+        _complete_forms(self.bundle, "q01")
+        path = self.bundle / "questions/q01/blind/ai-audit.json"
+        audit = json.loads(path.read_text())
+        audit["answers"]["A"]["claims"] = []
+        duel.write_private_json(path, audit)
+        with self.assertRaisesRegex(duel.BenchmarkError, "claim ledger"):
+            duel.derive_question_result(self.bundle, "q01")
+
+        audit["answers"]["A"]["claims"] = [{
+            "claim": "A load-bearing claim",
+            "citations": [],
+            "citation_fit": "supports",
+            "fact_date": None,
+            "freshness": "unknown",
+            "support_status": "verified",
+            "evidence_note": "checked",
+        }]
+        duel.write_private_json(path, audit)
+        with self.assertRaisesRegex(duel.BenchmarkError, "freshness"):
+            duel.derive_question_result(self.bundle, "q01")
+
+        audit["answers"]["A"]["claims"][0].update({
+            "freshness": "current",
+            "fact_date": "someday",
+        })
+        duel.write_private_json(path, audit)
+        with self.assertRaisesRegex(duel.BenchmarkError, "fact date"):
+            duel.derive_question_result(self.bundle, "q01")
+
 
 class TestMockedFiveQuestionEndToEnd(DuelTestCase):
     def test_complete_bundle_reports_winner_and_keeps_cost_time_separate(self):
@@ -545,6 +658,10 @@ class TestMockedFiveQuestionEndToEnd(DuelTestCase):
         self.assertTrue((self.bundle / "report.md").is_file())
         self.assertEqual(json.loads((self.bundle / "bundle.json").read_text())["state"],
                          "complete")
+        if os.name == "posix":
+            for path in self.bundle.rglob("*"):
+                expected = 0o700 if path.is_dir() else 0o600
+                self.assertEqual(path.stat().st_mode & 0o777, expected, path)
 
     def test_two_two_one_is_an_overall_tie(self):
         self.init()

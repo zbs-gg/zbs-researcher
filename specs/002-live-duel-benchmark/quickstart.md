@@ -11,7 +11,8 @@ python3 -m unittest discover -s tests -p 'test_duel_benchmark.py'
 ```
 
 Expected: frozen-suite, preflight, snapshot, paid-consent, retry, blinding,
-partial-report refusal, veto, scoring, privacy, and mocked five-pair tests pass.
+paid-call cost reconciliation, claim-ledger validation, partial-report refusal,
+veto, scoring, recursive directory privacy, and mocked five-pair tests pass.
 
 ## 2. Full repository checks
 

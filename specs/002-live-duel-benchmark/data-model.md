@@ -49,7 +49,9 @@ No transition skips missing pair/audit/judgment validation.
 - relative paths for plan, manifest, synthesis, and copied raw materials
 - objective scores
 - validation receipt: exact-question match, complete manifest, successful source
-- optional reported cost entries and duration from source metadata
+- duration from source metadata
+- one unique receipt per paid call with actual, estimated, or unavailable cost
+- conservative USD reconciliation by call ID whenever the provider amount is unavailable
 
 Once accepted, the snapshot is immutable.
 
@@ -76,10 +78,13 @@ after `technical_failure` and explicit retry authorization.
 
 For A and B:
 
-- `complete`: boolean
-- `load_bearing_claims_checked`: boolean
-- `citation_fit_checked`: boolean
-- `freshness_checked`: boolean
+- `status`: `pending` or `complete`
+- `claims`: non-empty ledger of every load-bearing claim
+  - claim text and citations
+  - `citation_fit`: `supports`, `partial`, `does_not_support`, or `not_applicable`
+  - fact date and `freshness`: `current`, `stale`, `undated`, or `not_applicable`
+  - `support_status`: `verified`, `bounded_inference`, `unsupported`, or `contradicted`
+  - non-empty evidence note
 - `unsupported_recommendations`: list
 - `omissions`: list
 - `contradictions`: list

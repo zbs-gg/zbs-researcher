@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 import time as real_time
@@ -64,6 +65,7 @@ FIRE_OUTPUT_NAMES = {
     "grok": "grok-x.md",
     "boom": "boom.md",
     "tiktok-ig": "tiktok-ig.md",
+    "slow": "slow.md",
 }
 
 
@@ -80,8 +82,10 @@ def make_registry(captured_queries=None):
         out_path.write_text("telegram result\n")
         return 2
 
-    def grok(query, out_path, max_items):
+    def grok(query, out_path, max_items, usage_sink=None):
         out_path.write_text("grok result\n")
+        if usage_sink is not None:
+            usage_sink.append({"prompt_tokens": 7, "completion_tokens": 5})
         return 4
 
     def boom(query, out_path, max_items):
@@ -89,6 +93,12 @@ def make_registry(captured_queries=None):
 
     def never(query, out_path, max_items):
         raise AssertionError("key-gated channel must never be called")
+
+    def slow(query, out_path, max_items):
+        deep_research.post_json(
+            "https://paid.example.invalid/research", {"query": query}, {},
+            timeout=0.05,
+        )
 
     return {
         c.name: c
@@ -98,6 +108,7 @@ def make_registry(captured_queries=None):
             Connector("telegram", "direct", tg, "fake telegram", [], default=False),
             Connector("grok", "llm", grok, "fake grok", []),
             Connector("boom", "direct", boom, "fake failing", []),
+            Connector("slow", "llm", slow, "fake slow paid lens", []),
             Connector("tiktok-ig", "direct", never, "fake key-gated",
                       ["scrapecreators"], default=False),
         ]
@@ -193,6 +204,49 @@ class FireEnvelopeTests(unittest.TestCase):
 # Degrade rules: unknown source, key-gated source, channel error
 # ---------------------------------------------------------------------------
 class FireDegradeTests(unittest.TestCase):
+    def test_paid_fire_total_deadline_keeps_error_and_cost_unknown_receipt(self):
+        class BlockingResponse:
+            def __init__(self):
+                self.closed = threading.Event()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+            def read(self):
+                self.closed.wait(5.0)
+                return b"{}"
+
+            def close(self):
+                self.closed.set()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            response = BlockingResponse()
+            started = real_time.monotonic()
+            with patched_runner(make_registry()), mock.patch.object(
+                deep_research.urllib.request, "urlopen", return_value=response
+            ):
+                stdout, _ = fire(out_dir, "slow", "bounded paid query")
+            elapsed = real_time.monotonic() - started
+            self.assertLess(elapsed, 1.0)
+            envelope = parse_envelope(self, stdout)
+            self.assertEqual(envelope["status"], "error")
+            self.assertIn("deadline", (out_dir / "slow.ERROR.md").read_text())
+            call = json.loads((out_dir / "manifest.json").read_text())["calls"][0]
+            self.assertEqual(call["status"], "error")
+            self.assertEqual(call["cost_class"], "paid")
+            self.assertEqual(call["cost_receipt"]["status"], "unavailable")
+            self.assertIsNone(call["cost_receipt"]["amount"])
+            self.assertTrue(call["call_id"].startswith("call-"))
+            if os.name == "posix":
+                self.assertEqual(
+                    (out_dir / "slow.ERROR.md").stat().st_mode & 0o777, 0o600
+                )
+            self.assertEqual(list(out_dir.glob(".slow.ERROR.md.*.tmp")), [])
+
     def test_unknown_source_exits_2_without_envelope(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "run"
@@ -299,6 +353,10 @@ class FireManifestAccumulationTests(unittest.TestCase):
                 [row["query"] for row in manifest["provenance"]],
                 ["first composed query", "second composed query"],
             )
+            self.assertEqual(
+                [(row["source"], row["status"]) for row in manifest["calls"]],
+                [("github", "ok"), ("telegram", "ok")],
+            )
             # Both result files coexist in the accumulated run.
             self.assertTrue((out_dir / "github.md").exists())
             self.assertTrue((out_dir / "telegram.md").exists())
@@ -315,6 +373,67 @@ class FireManifestAccumulationTests(unittest.TestCase):
             manifest = json.loads((out_dir / "manifest.json").read_text())
             self.assertEqual(manifest["mode"], "investigate")
             self.assertEqual(len(manifest["provenance"]), 1)
+
+    def test_paid_lens_fire_preserves_real_usage_and_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            with patched_runner(make_registry()):
+                stdout, _ = fire(out_dir, "grok", "current X evidence")
+            self.assertEqual(parse_envelope(self, stdout)["status"], "ok")
+            manifest = json.loads((out_dir / "manifest.json").read_text())
+            channel = manifest["channels"]["grok"]
+            self.assertEqual(channel["usage"], [
+                {"prompt_tokens": 7, "completion_tokens": 5}
+            ])
+            self.assertEqual(channel["tokens"], 12)
+            self.assertEqual(channel["tokens_kind"], "real")
+            call = manifest["calls"][0]
+            self.assertEqual(call["provider"], "xai")
+            self.assertEqual(call["tokens"], 12)
+            self.assertEqual(call["tokens_kind"], "real")
+            self.assertEqual(call["cost_class"], "paid")
+            self.assertEqual(call["cost_receipt"]["status"], "unavailable")
+
+    def test_manifest_is_private_and_atomic_temp_is_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            with patched_runner(make_registry()):
+                fire(out_dir, "github", "q")
+            manifest = out_dir / "manifest.json"
+            self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(out_dir.glob(".manifest.json.*.tmp")), [])
+
+    def test_fire_lock_serializes_two_writers_for_one_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            out_dir.mkdir()
+            first = deep_research._acquire_fire_lock(out_dir)
+            acquired = threading.Event()
+
+            def take_second_lock():
+                second = deep_research._acquire_fire_lock(out_dir)
+                acquired.set()
+                deep_research._release_fire_lock(second)
+
+            worker = threading.Thread(target=take_second_lock, daemon=True)
+            worker.start()
+            self.assertFalse(acquired.wait(0.05))
+            deep_research._release_fire_lock(first)
+            self.assertTrue(acquired.wait(1.0))
+            worker.join(1.0)
+            self.assertFalse(worker.is_alive())
+
+    def test_fire_releases_lock_after_unexpected_recording_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            with patched_runner(make_registry()), mock.patch.object(
+                deep_research, "_execute_fire_locked",
+                side_effect=RuntimeError("receipt assembly failed"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "receipt assembly"):
+                    fire(out_dir, "github", "q")
+            recovered = deep_research._acquire_fire_lock(out_dir)
+            deep_research._release_fire_lock(recovered)
 
 
 # ---------------------------------------------------------------------------

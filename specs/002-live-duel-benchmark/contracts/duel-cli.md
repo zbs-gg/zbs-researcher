@@ -52,6 +52,12 @@ reclassified this way merely because its answer is poor. Reported paid-source
 cost entries require provider, USD amount, and basis, and the cumulative five-
 question Researcher cost may not exceed USD 10.
 
+Every paid `manifest.calls[]` row requires a unique `call_id` and an actual,
+estimated, or explicitly unavailable USD cost receipt. Actual and estimated
+amounts count directly. An unavailable amount must be reconciled by `call_id`
+to exactly one conservative `manifest.costs[]` entry before snapshot acceptance;
+missing or duplicate coverage fails closed and cannot evade the budget cap.
+
 ## `run-parallel`
 
 ```text
@@ -85,7 +91,11 @@ duel_benchmark.py report --bundle DIR
 ```
 
 Validates all five pairs, mappings, completed AI audits, and complete owner
-scores. It refuses any missing/invalid input. For each question it computes:
+scores. It refuses any missing/invalid input. The audit is complete only when
+each answer has a non-empty claim ledger. Every
+entry records claim text, citations, citation-fit verdict, fact date/freshness,
+support status, and a non-empty evidence note; summary booleans are not accepted.
+For each question it computes:
 
 - five-dimension A/B totals;
 - winner only when the margin is at least three;
