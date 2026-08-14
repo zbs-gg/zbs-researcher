@@ -156,3 +156,7 @@ the shipped behavior.
   validation.
 - No task adds a monid connector, hidden runtime lookup, publication, version
   bump, or merge.
+
+## Phase 7: Convergence
+
+- [x] T020 Persist an auditable Parallel artifact bundle with the raw response, readable answer, normalized counted-evidence receipts, run identity and state, timing, processor and price basis, relative paths, atomic `0600` writes, regression tests, and operator documentation in `skills/deep-research/scripts/eval_harness.py`, `skills/deep-research/tests/test_eval_harness.py`, `specs/001-parallel-baseline-freshness/contracts/eval-cli.md`, `specs/001-parallel-baseline-freshness/quickstart.md`, `README.md`, `CONFIGURATION.md`, and `CHANGELOG.md` per FR-011 and FR-012 (partial)

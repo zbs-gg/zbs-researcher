@@ -8,6 +8,11 @@
   key alone never spends. The CLI names the selected processor and verified
   list price before the call, restricts selection to the priced pro/ultra
   deep-research variants, and persists that price basis in `eval-log.jsonl`.
+- **Reproducible paid-run receipts.** Optional `--artifact-dir` persistence now
+  keeps the full Parallel response, readable answer, normalized counted and
+  excluded citations, run ID/state/timing, processor, and published price
+  basis. Bundle paths stay relative; files are atomically written with private
+  permissions and scrubbed of keys and personal absolute paths.
 - **Honest comparison failures.** Missing keys, failed starts, timeouts, and
   empty results remain explicit unavailable states while the researcher side
   is still scored. Parallel's undated citations remain `unknown`, never

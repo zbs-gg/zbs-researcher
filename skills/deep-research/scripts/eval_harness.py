@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -67,6 +68,10 @@ PARALLEL_PRICE_USD = {
 # for queue/polling slop, but never wait forever.
 PARALLEL_POLL_SECONDS = 15
 PARALLEL_DEADLINE_SECONDS = 45 * 60
+PARALLEL_PRICING_SOURCE = "https://docs.parallel.ai/getting-started/pricing"
+PARALLEL_PROCESSOR_SOURCE = (
+    "https://docs.parallel.ai/task-api/guides/choose-a-processor"
+)
 BASELINE_KINDS = ("web-index", "parallel")
 
 # Native social/community platforms (the coverage axis). Keys are the tokens a
@@ -525,31 +530,185 @@ def _citation_excerpts(citation):
     return [" ".join(str(c).split()) for c in candidates if str(c).strip()]
 
 
-def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
-                          sleep=None, deadline_seconds=None, now=None,
-                          announce=None):
-    """Run ONE Parallel deep-research task and score it on the same three axes.
+def _parallel_content_markdown(result):
+    """Return only the human answer body, without synthesizing new claims."""
+    if not isinstance(result, dict):
+        return ""
+    output = result.get("output")
+    content = output.get("content") if isinstance(output, dict) else output
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    return json.dumps(content, ensure_ascii=False, indent=2)
 
-    Returns the scores dict, or an honest "unavailable - ..." string. Never
-    raises: a baseline that fell over must not take the Beast side down with
-    it. The key travels in the x-api-key header only — never in a URL, never
-    in a failure string.
+
+def _parallel_citations(result):
+    """Yield structured citations in provider order, preserving duplicates."""
+    if not isinstance(result, dict) or not isinstance(result.get("output"), dict):
+        return []
+    citations = []
+    for entry in result["output"].get("basis") or []:
+        if not isinstance(entry, dict):
+            continue
+        citations.extend(
+            citation for citation in (entry.get("citations") or [])
+            if isinstance(citation, dict) and citation.get("url")
+        )
+    return citations
+
+
+def normalize_parallel_evidence(result):
+    """Create receipts showing exactly why each Parallel link did or did not
+    affect a score. Structured citations are primary; additional inline answer
+    links are retained so the receipt matches the scorer's complete input.
     """
+    records = []
+    for citation in _parallel_citations(result):
+        excerpts = _citation_excerpts(citation)
+        records.append({
+            "url": str(citation.get("url")),
+            "normalized_url": normalize_url(citation.get("url")),
+            "excerpts": excerpts,
+            "has_usable_excerpt": bool(excerpts),
+            "source_shape": "structured_citation",
+        })
+
+    structured_urls = {record["normalized_url"] for record in records}
+    for item in extract_evidence(_parallel_content_markdown(result)):
+        normalized = normalize_url(item.get("url"))
+        if normalized in structured_urls:
+            continue
+        records.append({
+            "url": str(item.get("url")),
+            "normalized_url": normalized,
+            "excerpts": [],
+            "has_usable_excerpt": bool(item.get("has_quote")),
+            "source_shape": "inline_answer",
+        })
+
+    counted_urls = set()
+    counted_platforms = set()
+    for record in records:
+        normalized = record["normalized_url"]
+        has_quote = record["has_usable_excerpt"]
+        if not has_quote:
+            record["counted_depth"] = False
+            record["exclusion_reason"] = "no_usable_excerpt"
+        elif normalized in counted_urls:
+            record["counted_depth"] = False
+            record["exclusion_reason"] = "duplicate_url"
+        else:
+            record["counted_depth"] = True
+            record["exclusion_reason"] = None
+            counted_urls.add(normalized)
+
+        platforms = sorted(set(_platforms_for(record["url"])))
+        record["native_social_platforms"] = platforms
+        newly_counted = [p for p in platforms if p not in counted_platforms]
+        record["counted_social"] = bool(newly_counted)
+        counted_platforms.update(platforms)
+    return records
+
+
+def _iso_utc(value):
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def _parallel_run_outcome(*, processor, state, reason, run_id, started_at,
+                          finished_at, duration_seconds, raw_response=None,
+                          answer_markdown="", evidence=None):
+    evidence = list(evidence or [])
+    scores = None
+    if state == "completed":
+        scores = {
+            "depth": sum(1 for item in evidence if item["counted_depth"]),
+            "freshness_hours": None,
+            "social_coverage": len({
+                platform
+                for item in evidence
+                for platform in item["native_social_platforms"]
+            }),
+        }
+    amount = PARALLEL_PRICE_USD.get(processor)
+    return {
+        "schema_version": 1,
+        "provider": "parallel",
+        "processor": processor,
+        "state": state,
+        "available": state == "completed",
+        "reason": reason,
+        "run_id": run_id,
+        "started_at": _iso_utc(started_at),
+        "finished_at": _iso_utc(finished_at),
+        "duration_seconds": round(max(float(duration_seconds), 0.0), 3),
+        "cost": {
+            "currency": "USD",
+            "amount": amount,
+            "basis": (
+                f"published list price per successful Task API run for {processor}; "
+                "actual vendor billing is authoritative"
+                if amount is not None else "published price unavailable"
+            ),
+            "source": PARALLEL_PRICING_SOURCE,
+            "processor_source": PARALLEL_PROCESSOR_SOURCE,
+        },
+        "scores": scores,
+        "raw_response": raw_response,
+        "answer_markdown": answer_markdown,
+        "evidence": evidence,
+    }
+
+
+def run_parallel_task(question, processor="ultra", post=None, fetch=None,
+                      sleep=None, deadline_seconds=None, now=None, utc_now=None,
+                      announce=None):
+    """Run one paid task and return its complete audit outcome.
+
+    Unlike the compatibility wrapper below, this function retains provider
+    identity, timestamps, the raw response, readable answer and evidence
+    receipts. It still degrades to a serializable unavailable outcome.
+    """
+    now = now if now is not None else time.monotonic
+    utc_now = utc_now if utc_now is not None else (
+        lambda: datetime.now(timezone.utc)
+    )
+    started_at = utc_now()
+    started_mono = now()
+
+    def finish(state, reason, run_id=None, raw_response=None,
+               answer_markdown="", evidence=None):
+        return _parallel_run_outcome(
+            processor=processor,
+            state=state,
+            reason=reason,
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=utc_now(),
+            duration_seconds=now() - started_mono,
+            raw_response=raw_response,
+            answer_markdown=answer_markdown,
+            evidence=evidence,
+        )
+
     if processor not in PARALLEL_DEEP_PROCESSORS:
-        return (
+        return finish(
+            "unavailable",
             "unavailable - parallel processor is not an allowed priced "
-            f"deep-research choice ({processor})"
+            f"deep-research choice ({processor})",
         )
     key = _read_parallel_key()
     if not key:
-        return (
+        return finish(
+            "unavailable",
             "unavailable - no parallel key configured "
-            f"(parallel-key.txt or {PARALLEL_API_ENV_VAR})"
+            f"(parallel-key.txt or {PARALLEL_API_ENV_VAR})",
         )
     post = post if post is not None else _post_json
     fetch = fetch if fetch is not None else _get_json
     sleep = sleep if sleep is not None else time.sleep
-    now = now if now is not None else time.monotonic
     announce = announce if announce is not None else (
         lambda message: print(message, file=sys.stderr)
     )
@@ -558,8 +717,6 @@ def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
     )
     headers = {"x-api-key": key}
 
-    # Put the disclosure immediately before the spend so imports cannot bypass
-    # the CLI's safety boundary.
     announce(parallel_price_note(processor))
     try:
         created = post(
@@ -571,14 +728,17 @@ def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
             },
             headers=headers,
         )
-    except Exception as exc:  # noqa: BLE001 — degrade, never kill the eval
-        return f"unavailable - parallel run could not start ({type(exc).__name__})"
+    except Exception as exc:  # noqa: BLE001
+        return finish(
+            "unavailable",
+            f"unavailable - parallel run could not start ({type(exc).__name__})",
+        )
 
     run_id = (created or {}).get("run_id") or (created or {}).get("id")
     if not run_id:
-        return "unavailable - parallel returned no run id"
+        return finish("unavailable", "unavailable - parallel returned no run id")
 
-    stop_at = now() + deadline_seconds
+    stop_at = started_mono + deadline_seconds
     result = None
     while True:
         try:
@@ -586,43 +746,203 @@ def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
                 f"{PARALLEL_BASE_URL}/tasks/runs/{run_id}/result", headers=headers
             )
             break
-        except Exception as exc:  # noqa: BLE001 — still running, or a blip
+        except Exception as exc:  # noqa: BLE001
             if now() >= stop_at:
-                return (
+                return finish(
+                    "unavailable",
                     "unavailable - parallel did not finish within "
-                    f"{int(deadline_seconds / 60)} min ({type(exc).__name__})"
+                    f"{int(deadline_seconds / 60)} min ({type(exc).__name__})",
+                    run_id=run_id,
                 )
             sleep(PARALLEL_POLL_SECONDS)
 
-    text = _parallel_text(result)
-    if not text.strip():
-        return "unavailable - parallel returned an empty result"
-    items = extract_evidence(text)
-    return {
-        "depth": score_depth(items),
-        "freshness_hours": None,  # Parallel does not date its citations
-        "social_coverage": score_social_coverage(it["url"] for it in items),
+    answer = _parallel_text(result)
+    if not answer.strip():
+        return finish(
+            "unavailable",
+            "unavailable - parallel returned an empty result",
+            run_id=run_id,
+            raw_response=result,
+        )
+    evidence = normalize_parallel_evidence(result)
+    return finish(
+        "completed", None, run_id=run_id, raw_response=result,
+        answer_markdown=answer, evidence=evidence,
+    )
+
+
+def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
+                          sleep=None, deadline_seconds=None, now=None,
+                          announce=None):
+    """Run ONE Parallel deep-research task and score it on the same three axes.
+
+    Returns the scores dict, or an honest "unavailable - ..." string. Never
+    raises: a baseline that fell over must not take the Beast side down with
+    it. The key travels in the x-api-key header only — never in a URL, never
+    in a failure string.
+    """
+    outcome = run_parallel_task(
+        question, processor=processor, post=post, fetch=fetch, sleep=sleep,
+        deadline_seconds=deadline_seconds, now=now, announce=announce,
+    )
+    if outcome["state"] == "completed":
+        return outcome["scores"]
+    return outcome["reason"]
+
+
+_PERSONAL_PATH_RE = re.compile(
+    r"(?<!https:)(?<!http:)/(?:Users|home)/[^\s\"']+|"
+    r"[A-Za-z]:\\Users\\[^\s\"']+"
+)
+
+
+def _sanitize_artifact(value, secrets=()):
+    """Redact credentials and personal absolute paths from persisted data."""
+    if isinstance(value, dict):
+        return {str(k): _sanitize_artifact(v, secrets) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_artifact(v, secrets) for v in value]
+    if not isinstance(value, str):
+        return value
+    clean = value
+    for secret in secrets:
+        if secret:
+            clean = clean.replace(str(secret), "[REDACTED]")
+    return _PERSONAL_PATH_RE.sub("[REDACTED_ABSOLUTE_PATH]", clean)
+
+
+def _atomic_write_private(path, payload):
+    """Atomically replace one artifact with a mode-0600 regular file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        os.chmod(path.parent, 0o700)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        os.chmod(temporary, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        if os.name == "posix":
+            os.chmod(path, 0o600)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _private_json(path, value):
+    _atomic_write_private(
+        path,
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+
+
+def persist_parallel_artifacts(outcome, artifact_dir):
+    """Write one self-contained Parallel audit bundle and return only paths
+    relative to that bundle. `parallel-outcome.json` is written last and acts
+    as the bundle's commit marker after the other atomic files are durable.
+    """
+    artifact_dir = Path(artifact_dir).expanduser()
+    artifacts = {
+        "raw_response": "parallel-raw.json",
+        "answer": "parallel-answer.md",
+        "evidence": "parallel-evidence.json",
+        "outcome": "parallel-outcome.json",
     }
+    secrets = tuple(filter(None, (
+        os.environ.get(PARALLEL_API_ENV_VAR, "").strip(),
+        _read_parallel_key(),
+    )))
+    safe_raw = _sanitize_artifact(outcome.get("raw_response"), secrets)
+    safe_answer = _sanitize_artifact(outcome.get("answer_markdown") or "", secrets)
+    safe_evidence = _sanitize_artifact(outcome.get("evidence") or [], secrets)
+
+    _private_json(artifact_dir / artifacts["raw_response"], safe_raw)
+    _atomic_write_private(
+        artifact_dir / artifacts["answer"],
+        safe_answer.rstrip() + ("\n" if safe_answer.strip() else ""),
+    )
+    _private_json(
+        artifact_dir / artifacts["evidence"],
+        {
+            "schema_version": 1,
+            "evidence": safe_evidence,
+            "counted_depth": sum(
+                1 for item in safe_evidence if item.get("counted_depth")
+            ),
+            "counted_native_social_platforms": sorted({
+                platform
+                for item in safe_evidence
+                for platform in item.get("native_social_platforms", [])
+            }),
+        },
+    )
+    public_outcome = {
+        key: value for key, value in outcome.items()
+        if key not in {"raw_response", "answer_markdown", "evidence"}
+    }
+    public_outcome["artifacts"] = {
+        key: value for key, value in artifacts.items() if key != "outcome"
+    }
+    _private_json(
+        artifact_dir / artifacts["outcome"],
+        _sanitize_artifact(public_outcome, secrets),
+    )
+    return artifacts
 
 
 # ---------------------------------------------------------------------------
 # Comparison + eval log
 # ---------------------------------------------------------------------------
 def run_eval(question, beast_dir, fetch=None, baseline="web-index",
-             processor="ultra", post=None):
+             processor="ultra", post=None, artifact_dir=None, sleep=None,
+             now=None, utc_now=None, announce=None):
     """Score both sides; return the eval row {ts, question, beast, baseline}.
 
     `baseline` selects which opponent runs. It defaults to the FREE web-index
     pass; "parallel" is opt-in and spends money, so nothing but an explicit
     caller choice may select it.
     """
-    if baseline == "parallel":
+    baseline_run = None
+    baseline_artifacts = None
+    if artifact_dir is not None and baseline != "parallel":
+        raise ValueError("artifact_dir is available only for the Parallel baseline")
+    if baseline == "parallel" and artifact_dir is not None:
+        outcome = run_parallel_task(
+            question, processor=processor, post=post, fetch=fetch, sleep=sleep,
+            now=now, utc_now=utc_now, announce=announce,
+        )
+        opponent = (
+            outcome["scores"]
+            if outcome["state"] == "completed"
+            else outcome["reason"]
+        )
+        baseline_artifacts = persist_parallel_artifacts(outcome, artifact_dir)
+        baseline_run = {
+            key: outcome[key]
+            for key in (
+                "provider", "processor", "state", "available", "reason",
+                "run_id", "started_at", "finished_at", "duration_seconds",
+            )
+        }
+    elif baseline == "parallel":
         opponent = run_parallel_baseline(
             question, processor=processor, post=post, fetch=fetch
         )
     else:
         opponent = run_baseline(question, fetch=fetch)
-    return {
+    row = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "question": question,
         "baseline_kind": baseline,
@@ -631,6 +951,10 @@ def run_eval(question, beast_dir, fetch=None, baseline="web-index",
         "beast": score_beast_dir(beast_dir),
         "baseline": opponent,
     }
+    if baseline_run is not None:
+        row["baseline_run"] = baseline_run
+        row["baseline_artifacts"] = baseline_artifacts
+    return row
 
 
 def _fmt(value):
@@ -720,15 +1044,23 @@ def main(argv=None):
         "--processor", choices=PARALLEL_DEEP_PROCESSORS, default="ultra",
         help="Parallel processor for --baseline parallel (default: ultra)",
     )
+    ap.add_argument(
+        "--artifact-dir", default=None,
+        help="private audit bundle directory for --baseline parallel: raw JSON, "
+             "readable answer, evidence receipts, run/timing/cost metadata",
+    )
     args = ap.parse_args(argv)
 
     beast_dir = Path(args.beast_dir).expanduser()
     if not beast_dir.is_dir():
         ap.error(f"--beast-dir is not a directory: {beast_dir}")
+    if args.artifact_dir and args.baseline != "parallel":
+        ap.error("--artifact-dir requires --baseline parallel")
 
     row = run_eval(
         args.question, beast_dir,
         baseline=args.baseline, processor=args.processor,
+        artifact_dir=args.artifact_dir,
     )
     ledger = resolve_ledger_path(args.out, beast_dir)
     ledger.parent.mkdir(parents=True, exist_ok=True)

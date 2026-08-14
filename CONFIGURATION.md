@@ -198,7 +198,8 @@ and no network call is made.
 
 ```bash
 python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" \
-    --beast-dir RUN_DIR --baseline parallel --processor ultra
+    --beast-dir RUN_DIR --baseline parallel --processor ultra \
+    --artifact-dir PRIVATE_ARTIFACT_DIR
 ```
 
 Runs the same question through Parallel's deep-research Task API and scores
@@ -223,6 +224,15 @@ rather than scored as a zero — an opponent that timed out has not lost on the
 merits. Parallel does not date its citations, so its freshness axis reads
 `unknown` instead of guessing. The JSONL row records the selected processor and
 the published per-run list price separately from the unknown final bill.
+
+`--artifact-dir` closes the audit trail for a real duel. It writes the complete
+Parallel result, a readable Markdown answer, normalized citation receipts with
+explicit counted/excluded reasons, and an outcome record containing run ID,
+UTC start/end, duration, final state, processor, list price, and the official
+pricing/processor references. Internal artifact names are relative; credential
+values and personal absolute paths are redacted. Each file is atomically
+replaced with mode `0600` and the directory is private on POSIX. The flag is
+rejected for the free web-index baseline, whose existing behavior is unchanged.
 
 ## Budget note
 

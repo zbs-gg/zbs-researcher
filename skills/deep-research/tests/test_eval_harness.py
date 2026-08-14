@@ -662,6 +662,153 @@ class TestParallelBaseline(unittest.TestCase):
         )
 
 
+class TestParallelArtifactBundle(unittest.TestCase):
+    def _run_with_artifacts(self, tmp, result):
+        run = _beast_dir(tmp)
+        secrets = Path(tmp) / "secrets"
+        secrets.mkdir(exist_ok=True)
+        (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+        artifacts = Path(tmp) / "artifacts"
+        wall_times = iter([
+            datetime(2026, 8, 14, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 14, 8, 0, 12, tzinfo=timezone.utc),
+        ])
+        mono_times = iter([100.0, 112.25])
+        with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+            row = eval_harness.run_eval(
+                "same frozen question",
+                run,
+                baseline="parallel",
+                processor="ultra",
+                artifact_dir=artifacts,
+                post=lambda *a, **k: {"run_id": "run_audit_123"},
+                fetch=lambda *a, **k: result,
+                sleep=lambda _s: None,
+                now=lambda: next(mono_times),
+                utc_now=lambda: next(wall_times),
+                announce=lambda _message: None,
+            )
+        return row, artifacts
+
+    def test_raw_answer_evidence_and_outcome_are_private_and_auditable(self):
+        result = {
+            "status": "completed",
+            "output": {
+                "content": "A readable answer.",
+                "basis": [{"citations": [
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpts": ["first-hand account with enough detail"],
+                    },
+                    {
+                        "url": "https://www.x.com/a/status/1/",
+                        "excerpt": "duplicate spelling of the same source",
+                    },
+                    {
+                        "url": "https://help.x.com/en/using-x",
+                        "excerpts": [],
+                    },
+                ]}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            row, artifacts = self._run_with_artifacts(tmp, result)
+
+            expected = {
+                "parallel-raw.json",
+                "parallel-answer.md",
+                "parallel-evidence.json",
+                "parallel-outcome.json",
+            }
+            self.assertEqual({p.name for p in artifacts.iterdir()}, expected)
+            if os.name == "posix":
+                for path in artifacts.iterdir():
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600, path)
+
+            raw = json.loads((artifacts / "parallel-raw.json").read_text())
+            self.assertEqual(raw, result)
+            answer = (artifacts / "parallel-answer.md").read_text()
+            self.assertIn("A readable answer", answer)
+            self.assertIn("https://x.com/a/status/1", answer)
+
+            evidence = json.loads(
+                (artifacts / "parallel-evidence.json").read_text()
+            )["evidence"]
+            self.assertEqual(len(evidence), 3)
+            self.assertTrue(evidence[0]["counted_depth"])
+            self.assertEqual(evidence[0]["native_social_platforms"], ["x"])
+            self.assertFalse(evidence[1]["counted_depth"])
+            self.assertEqual(evidence[1]["exclusion_reason"], "duplicate_url")
+            self.assertFalse(evidence[2]["counted_depth"])
+            self.assertEqual(evidence[2]["exclusion_reason"], "no_usable_excerpt")
+
+            outcome = json.loads(
+                (artifacts / "parallel-outcome.json").read_text()
+            )
+            self.assertEqual(outcome["run_id"], "run_audit_123")
+            self.assertEqual(outcome["state"], "completed")
+            self.assertEqual(outcome["started_at"], "2026-08-14T08:00:00+00:00")
+            self.assertEqual(outcome["finished_at"], "2026-08-14T08:00:12+00:00")
+            self.assertEqual(outcome["duration_seconds"], 12.25)
+            self.assertEqual(outcome["processor"], "ultra")
+            self.assertEqual(outcome["cost"]["amount"], 0.3)
+            self.assertIn("docs.parallel.ai", outcome["cost"]["source"])
+            self.assertEqual(
+                set(outcome["artifacts"].values()),
+                expected - {"parallel-outcome.json"},
+            )
+            self.assertTrue(all(not Path(p).is_absolute()
+                                for p in outcome["artifacts"].values()))
+            self.assertEqual(row["baseline_artifacts"]["outcome"],
+                             "parallel-outcome.json")
+            serialized = json.dumps(row) + json.dumps(outcome)
+            self.assertNotIn(PARALLEL_KEY, serialized)
+            self.assertNotIn(str(Path(tmp)), serialized)
+
+    def test_failed_parallel_attempt_still_persists_timing_and_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            secrets = Path(tmp) / "secrets"
+            secrets.mkdir()
+            (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+            artifacts = Path(tmp) / "failed"
+            wall_times = iter([
+                datetime(2026, 8, 14, 9, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 14, 9, 0, 1, tzinfo=timezone.utc),
+            ])
+            mono_times = iter([5.0, 6.0])
+
+            def fail(*_args, **_kwargs):
+                raise urllib.error.HTTPError("secret-url", 500, "boom", None, None)
+
+            with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+                row = eval_harness.run_eval(
+                    "q", run, baseline="parallel", artifact_dir=artifacts,
+                    post=fail, fetch=fail, sleep=lambda _s: None,
+                    now=lambda: next(mono_times),
+                    utc_now=lambda: next(wall_times),
+                    announce=lambda _message: None,
+                )
+            outcome = json.loads((artifacts / "parallel-outcome.json").read_text())
+            self.assertEqual(outcome["state"], "unavailable")
+            self.assertIn("could not start", outcome["reason"])
+            self.assertEqual(outcome["duration_seconds"], 1.0)
+            self.assertIsNone(outcome["run_id"])
+            self.assertIsInstance(row["baseline"], str)
+            self.assertNotIn("secret-url", json.dumps(outcome))
+
+    def test_artifact_flag_is_rejected_for_the_free_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            with contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                eval_harness.main([
+                    "q", "--beast-dir", str(run),
+                    "--artifact-dir", str(Path(tmp) / "artifacts"),
+                ])
+        self.assertEqual(raised.exception.code, 2)
+
+
 class TestEvalLog(unittest.TestCase):
     def test_row_appended_and_valid_json(self):
         with tempfile.TemporaryDirectory() as tmp:

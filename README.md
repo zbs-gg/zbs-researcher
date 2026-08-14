@@ -261,7 +261,8 @@ research, but only by explicit choice:
 
 ```bash
 python3 "$SKILL_DIR/scripts/eval_harness.py" "<same question>" \
-    --beast-dir RUN_DIR --baseline parallel --processor ultra
+    --beast-dir RUN_DIR --baseline parallel --processor ultra \
+    --artifact-dir PRIVATE_ARTIFACT_DIR
 ```
 
 A configured key never triggers this baseline by itself. Both sides are scored
@@ -269,6 +270,12 @@ on quoted-source depth, known freshness, and native social coverage; unavailable
 or undated evidence stays unavailable or unknown rather than becoming a fake
 zero. See [Configuration](CONFIGURATION.md#paid-baseline-parallel-deep-research-opt-in)
 for the provider, cost, and data boundary.
+
+With `--artifact-dir`, the duel keeps the complete provider JSON, readable
+answer, normalized citation receipts showing what entered each score, run ID,
+state, timing, processor, and the published price basis. Files are replaced
+atomically with private permissions, and all recorded paths inside the bundle
+are relative. Omit the flag to retain the original lightweight eval behavior.
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`

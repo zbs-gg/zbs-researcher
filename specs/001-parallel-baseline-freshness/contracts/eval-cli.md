@@ -7,6 +7,7 @@ eval_harness.py QUESTION --beast-dir DIR
   [--out FILE_OR_DIR]
   [--baseline web-index|parallel]
   [--processor pro|pro-fast|ultra|ultra-fast]
+  [--artifact-dir PRIVATE_DIR]
 ```
 
 ## Selection rules
@@ -17,6 +18,8 @@ eval_harness.py QUESTION --beast-dir DIR
 - A Parallel request is permitted only when the invocation contains
   `--baseline parallel`.
 - `--processor` affects only the selected Parallel baseline.
+- `--artifact-dir` is valid only with `--baseline parallel`; omitting it keeps
+  the pre-existing lightweight evaluation behavior unchanged.
 
 ## Provider contract
 
@@ -60,3 +63,18 @@ return an `unavailable - ...` baseline value. They MUST NOT:
 One JSON object is appended to `eval-log.jsonl` in the explicit output location
 or the researcher run directory. The row names `baseline_kind` so tables and
 later comparisons cannot mislabel the opponent.
+
+When `--artifact-dir` is selected, the row also contains only relative artifact
+names and the directory becomes a private audit bundle:
+
+- `parallel-raw.json` — complete provider result after secret/path redaction;
+- `parallel-answer.md` — readable answer plus the citations supplied for it;
+- `parallel-evidence.json` — normalized citations, excerpts, deduplication and
+  explicit depth/social score receipts;
+- `parallel-outcome.json` — run ID, state, UTC start/end, measured duration,
+  processor, published price and source, scores, and relative artifact names.
+
+Each artifact is written through an atomic replacement with mode `0600`; the
+bundle directory is mode `0700` on POSIX. `parallel-outcome.json` is written
+last and is the completion marker. No credential or personal absolute path may
+appear in an artifact or the ledger row.

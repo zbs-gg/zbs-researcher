@@ -45,12 +45,15 @@ chooses the paid opponent:
 ```bash
 python3 skills/deep-research/scripts/eval_harness.py \
   "question" --beast-dir /absolute/stored/run \
-  --baseline parallel --processor ultra
+  --baseline parallel --processor ultra \
+  --artifact-dir /private/runtime/parallel-attempt
 ```
 
 Expected before network activity: the CLI names Parallel, the processor, and
 the per-run list price. The resulting ledger names the opponent and preserves
-an unavailable state if the task cannot finish. This step is not part of CI and
+an unavailable state if the task cannot finish. The private directory contains
+raw JSON, a readable answer, normalized score receipts, and run/timing/cost
+metadata with only relative internal paths. This step is not part of CI and
 must never be run with a real key merely to validate code.
 
 ## 5. Claim-grading report check
