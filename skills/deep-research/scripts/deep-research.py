@@ -122,6 +122,13 @@ from output_paths import (
     resolve_output_directory,
     resolve_project_root,
 )
+from fire_audit import (
+    acquire_run_lock as _acquire_fire_lock,
+    read_response_with_deadline as _read_response_with_deadline,
+    release_run_lock as _release_fire_lock,
+    write_private_json_atomic as _write_private_json_atomic,
+    write_private_text_atomic as _write_private_text_atomic,
+)
 
 # Terminal UI (R4/R5): capability tiers, ZBS RESEARCHER banner, live board.
 # In the plain tier (pipes, CI, NO_COLOR, TERM=dumb) the runner's stderr is
@@ -229,21 +236,43 @@ PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_RESEARCH_MODEL", "sonar")
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
+def _read_json_request(req, timeout):
+    started = time.monotonic()
+    try:
+        response = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        remaining = float(timeout) - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError(
+                f"HTTP total wall-clock deadline exceeded after {timeout:g} seconds"
+            ) from exc
+        try:
+            exc._zbs_bounded_body = _read_response_with_deadline(exc, remaining)
+        finally:
+            exc.close()
+        raise
+    with response as handle:
+        remaining = float(timeout) - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError(
+                f"HTTP total wall-clock deadline exceeded after {timeout:g} seconds"
+            )
+        raw = _read_response_with_deadline(handle, remaining)
+    return json.loads(raw)
+
+
 def post_json(url, body, headers, timeout=300):
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json", "User-Agent": UA, **headers},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    return _read_json_request(req, timeout)
 
 
 def get_json(url, headers=None, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read()
-    return json.loads(raw)
+    return _read_json_request(req, timeout)
 
 
 def _extract_responses_text(data):
@@ -1314,7 +1343,8 @@ OUTPUT_NAMES = {
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
-def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True):
+def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True,
+                  record_error_seconds=False):
     """Run one connector; record its outcome in the manifest.
 
     ``announce`` controls the per-channel stderr prints: True in the plain
@@ -1335,9 +1365,12 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
     # itself — appends a marker here. Coverage-receipts turn that into the only
     # honest "no web index has this" claim we can make about our own output.
     evidence_sink = []
+    usage_sink = []
     kwargs = {}
     try:
         parameters = inspect.signature(conn.fn).parameters
+        if "usage_sink" in parameters:
+            kwargs["usage_sink"] = usage_sink
         if "freshness_sink" in parameters:
             kwargs["freshness_sink"] = freshness_sink
         if "evidence_sink" in parameters:
@@ -1348,6 +1381,17 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
         n = conn.fn(query, out_path, max_items, **kwargs)
         dt = time.time() - t0
         record = {"status": "ok", "items_or_chars": n, "seconds": round(dt, 1)}
+        if usage_sink:
+            record["usage"] = usage_sink
+            record["tokens"] = sum(_usage_total(row) for row in usage_sink)
+            record["tokens_kind"] = "real"
+        elif conn.kind == "llm":
+            # Some providers omit usage. Preserve that fact and a clearly
+            # labelled size estimate instead of silently losing the paid call.
+            size = out_path.stat().st_size if out_path.exists() else 0
+            record["usage"] = []
+            record["tokens"] = size // 4
+            record["tokens_kind"] = "est"
         if freshness_sink:
             record["newest_item_age_hours"] = round(
                 max(0.0, (time.time() - max(freshness_sink)) / 3600.0), 1
@@ -1362,16 +1406,32 @@ def run_connector(conn, query, out_dir, max_items, manifest, lock, announce=True
         if announce:
             print(f"[{conn.name}] OK {dt:.1f}s ({n})", file=sys.stderr)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:800]
-        out_path.with_suffix(".ERROR.md").write_text(f"HTTP {e.code}\n{detail}")
+        dt = time.time() - t0
+        raw_detail = getattr(e, "_zbs_bounded_body", None)
+        if raw_detail is None:
+            try:
+                raw_detail = _read_response_with_deadline(e, 1.0)
+            except Exception:
+                raw_detail = str(e).encode("utf-8", "replace")
+        detail = raw_detail.decode("utf-8", "replace")[:800]
+        _write_private_text_atomic(
+            out_path.with_suffix(".ERROR.md"), f"HTTP {e.code}\n{detail}"
+        )
+        record = {"status": "error", "error": f"HTTP {e.code}"}
+        if record_error_seconds:
+            record["seconds"] = round(dt, 1)
         with lock:
-            manifest["channels"][conn.name] = {"status": "error", "error": f"HTTP {e.code}"}
+            manifest["channels"][conn.name] = record
         if announce:
             print(f"[{conn.name}] HTTP {e.code}: {detail[:160]}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001 — degrade, never kill siblings
-        out_path.with_suffix(".ERROR.md").write_text(f"ERROR: {e}")
+        dt = time.time() - t0
+        _write_private_text_atomic(out_path.with_suffix(".ERROR.md"), f"ERROR: {e}")
+        record = {"status": "error", "error": str(e)[:200]}
+        if record_error_seconds:
+            record["seconds"] = round(dt, 1)
         with lock:
-            manifest["channels"][conn.name] = {"status": "error", "error": str(e)[:200]}
+            manifest["channels"][conn.name] = record
         if announce:
             print(f"[{conn.name}] ERROR: {e}", file=sys.stderr)
 
@@ -1702,6 +1762,154 @@ def _ran_channel_items(record):
     return 0
 
 
+def _usage_total(usage):
+    """Normalize the usage blocks returned by supported paid lenses."""
+    if not isinstance(usage, dict):
+        return 0
+    for key in ("total_tokens", "totalTokenCount"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+    prompt = usage.get("prompt_tokens") or usage.get("promptTokenCount") or 0
+    completion = (
+        usage.get("completion_tokens") or usage.get("candidatesTokenCount") or 0
+    )
+    return int((prompt or 0) + (completion or 0))
+
+
+def _fire_provider(source):
+    """Name the provider that actually receives a paid fire request."""
+    if source in {"gemini", "grok", "perplexity"}:
+        if not KEYS.get(source) and KEYS.get("openrouter"):
+            return "openrouter"
+    if source == "threads" and not KEYS.get("threads") and KEYS.get("scrapecreators"):
+        return "scrapecreators"
+    if source == "tiktok-ig":
+        return (
+            "apify" if os.environ.get("DEEP_RESEARCH_TIKTOK_VENDOR") == "apify"
+            else "scrapecreators"
+        )
+    return {"grok": "xai"}.get(source, source)
+
+
+def _fire_is_paid(source, conn):
+    provider = _fire_provider(source)
+    return conn.kind == "llm" or provider in {"scrapecreators", "apify"}
+
+
+def _usage_cost(usage_rows):
+    total = 0.0
+    found = False
+    for row in usage_rows or []:
+        if not isinstance(row, dict):
+            continue
+        for key in ("cost", "total_cost"):
+            amount = row.get(key)
+            if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                total += float(amount)
+                found = True
+                break
+    return total if found else None
+
+
+def _fire_cost_receipt(source, conn, record):
+    paid = _fire_is_paid(source, conn)
+    if not paid:
+        return "free", {
+            "status": "not_applicable",
+            "amount": 0.0,
+            "currency": "USD",
+            "basis": "connector is not classified as pay-per-use",
+        }
+    amount = _usage_cost(record.get("usage")) if record.get("status") == "ok" else None
+    if amount is not None:
+        return "paid", {
+            "status": "actual",
+            "amount": amount,
+            "currency": "USD",
+            "basis": "provider usage response",
+        }
+    return "paid", {
+        "status": "unavailable",
+        "amount": None,
+        "currency": "USD",
+        "basis": (
+            "provider call failed before billing metadata was returned"
+            if record.get("status") != "ok"
+            else "provider response did not expose billing metadata"
+        ),
+    }
+
+
+def _execute_fire_locked(args, topic, out_dir, conn, source):
+    """Execute and durably record one fire while the caller owns the run lock."""
+    manifest_path = out_dir / "manifest.json"
+    manifest = {}
+    if manifest_path.exists():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                manifest = loaded
+        except (OSError, ValueError):
+            print(
+                "[fire] existing manifest.json is unreadable — starting fresh",
+                file=sys.stderr,
+            )
+    manifest["mode"] = "investigate"
+    manifest.setdefault("topic", topic)
+    manifest.setdefault("started", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    channels = manifest.setdefault("channels", {})
+    if not isinstance(channels, dict):
+        channels = manifest["channels"] = {}
+    provenance_rows = manifest.setdefault("provenance", [])
+    if not isinstance(provenance_rows, list):
+        provenance_rows = manifest["provenance"] = []
+
+    max_items = args.max_items if args.max_items is not None else 10
+    call_started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    run_connector(
+        conn, topic, out_dir, max_items, manifest, threading.Lock(),
+        record_error_seconds=True,
+    )
+    record = channels.get(source) or {}
+    status = record.get("status") or "error"
+    items = _ran_channel_items(record)
+    age = record.get("newest_item_age_hours")
+    prov = _import_sibling("provenance").provenance_record(
+        source, topic, items, newest_item_age_hours=age,
+        self_sourced=record.get("self_sourced", False),
+        self_sourced_items=record.get("self_sourced_items", 0),
+    )
+    provenance_rows.append(prov)
+    calls = manifest.setdefault("calls", [])
+    if not isinstance(calls, list):
+        calls = manifest["calls"] = []
+    call_id = f"call-{len(calls) + 1:03d}"
+    cost_class, cost_receipt = _fire_cost_receipt(source, conn, record)
+    calls.append({
+        "call_id": call_id,
+        "source": source,
+        "provider": _fire_provider(source),
+        "cost_class": cost_class,
+        "cost_receipt": cost_receipt,
+        "query": topic,
+        "status": status,
+        "items_or_chars": items,
+        "seconds": record.get("seconds"),
+        "usage": record.get("usage") if status == "ok" else None,
+        "tokens": record.get("tokens") if status == "ok" else None,
+        "tokens_kind": record.get("tokens_kind") if status == "ok" else None,
+        "started_at": call_started_at,
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    })
+    manifest["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    out_path = out_dir / OUTPUT_NAMES[source]
+    if status != "ok":
+        out_path = out_path.with_suffix(".ERROR.md")
+    _write_private_json_atomic(manifest_path, manifest)
+    return out_path, status, items, prov
+
+
 def run_fire_cli(args, topic, launch_cwd, ap):
     """--fire mode entrypoint (R1/R2/R5): fire ONE composed query on ONE named
     source for the session-driven investigate loop.
@@ -1750,55 +1958,22 @@ def run_fire_cli(args, topic, launch_cwd, ap):
     except (OSError, ValueError) as exc:
         ap.error(str(exc))
 
-    # Accumulating run manifest: load what previous fires wrote, append this
-    # fire's channel record + provenance record, write it back.
-    manifest_path = out_dir / "manifest.json"
-    manifest = {}
-    if manifest_path.exists():
-        try:
-            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                manifest = loaded
-        except (OSError, ValueError):
-            print(
-                "[fire] existing manifest.json is unreadable — starting fresh",
-                file=sys.stderr,
-            )
-    manifest["mode"] = "investigate"
-    manifest.setdefault("topic", topic)
-    channels = manifest.setdefault("channels", {})
-    if not isinstance(channels, dict):
-        channels = manifest["channels"] = {}
-    provenance_rows = manifest.setdefault("provenance", [])
-    if not isinstance(provenance_rows, list):
-        provenance_rows = manifest["provenance"] = []
-
-    max_items = args.max_items if args.max_items is not None else 10
-    run_connector(conn, topic, out_dir, max_items, manifest, threading.Lock())
-
-    record = channels.get(source) or {}
-    status = record.get("status") or "error"
-    items = _ran_channel_items(record)
-    # Structural channels (hackernews/reddit/github-issues/bluesky) record the
-    # newest item's age in run_connector; pass it so provenance carries a real
-    # freshness_hours and the pre-index override can fire for a fresh live post.
-    # LLM lenses report None here -> honest "age unknown".
-    age = record.get("newest_item_age_hours")
-    prov = _import_sibling("provenance").provenance_record(
-        source, topic, items, newest_item_age_hours=age,
-        self_sourced=record.get("self_sourced", False),
-        self_sourced_items=record.get("self_sourced_items", 0),
-    )
-    provenance_rows.append(prov)
-
-    out_path = out_dir / OUTPUT_NAMES[source]
-    if status != "ok":
-        out_path = out_path.with_suffix(".ERROR.md")
+    # One output directory is one append-only audit stream. Serialize the
+    # entire connector call so concurrent paid fires cannot overwrite a raw
+    # response or lose each other's manifest receipts.
+    try:
+        fire_lock = _acquire_fire_lock(out_dir)
+    except OSError as exc:
+        ap.error(f"cannot lock fire run {out_dir}: {exc}")
 
     try:
-        manifest_path.write_text(json.dumps(manifest, indent=2))
+        out_path, status, items, prov = _execute_fire_locked(
+            args, topic, out_dir, conn, source
+        )
     except OSError as exc:
         ap.error(str(exc))
+    finally:
+        _release_fire_lock(fire_lock)
 
     print(
         json.dumps(

@@ -182,6 +182,28 @@ runs=("$PROJECT"/research/deep-research-*)
 test "${#runs[@]}" -eq 1
 echo "   prepared plan-first handoff reused exactly one run"
 
+# The official duel may be initialized and inspected with every host key still
+# present, but initialization is offline and cannot authorize a paid attempt.
+DUEL_DIR="$OUT/duel-v1-selftest"
+python3 "$HERE/duel_benchmark.py" init --bundle "$DUEL_DIR" >/dev/null
+python3 - "$ROOT" "$DUEL_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root, bundle = map(Path, sys.argv[1:])
+suite = json.loads((root / "benchmarks/duel-v1.json").read_text(encoding="utf-8"))
+frozen = json.loads((bundle / "suite.json").read_text(encoding="utf-8"))["suite"]
+preflight = json.loads((bundle / "preflight.json").read_text(encoding="utf-8"))
+if len(suite["questions"]) != 5 or frozen["questions"] != suite["questions"]:
+    raise SystemExit("duel preflight did not freeze the exact five-question suite")
+if preflight["paid_authorized"] is not False:
+    raise SystemExit("duel initialization authorized paid work")
+if preflight["pricing_checked_for_live_run"] is not False:
+    raise SystemExit("selftest must not claim a live price check")
+print("   duel-v1 froze five questions and authorized no paid work")
+PY
+
 echo "3/10 plugin metadata agreement…"
 python3 - "$ROOT" <<'PY'
 import json

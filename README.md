@@ -240,12 +240,19 @@ python3 "$SCRIPT" --feedback "grok was gold, reddit stale" --topic "agent memory
 ```
 
 Repeated fires into the same `--output-dir` accumulate one `manifest.json`
-with a provenance record per fire — the coverage-receipts source. The
-feedback note is saved locally to inform the next run on the topic (relayed
-to a Cartographer install only when you connect one — it is never described
-as "learned"). The full playbook (compose table, drill bounds, paid-lens
-budget) lives in the skill's INVESTIGATE MODE section; the knobs and the
-eval harness are in [CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
+with a provenance record and call receipt per fire — including the provider
+route, timing, real vendor usage when returned, and an explicit actual,
+estimated, or unavailable cost state. HTTP response bodies obey the connector's
+total wall-clock deadline; a timeout leaves an atomic private error receipt
+instead of an indefinitely open paid call. One run directory accepts only one
+active fire at a time; the cross-process lock prevents a slow paid call from
+being overwritten by a second operator. The manifest is replaced atomically
+with owner-only permissions. The feedback note is saved locally to
+inform the next run on the topic (relayed to a Cartographer install only when
+you connect one — it is never described as "learned"). The full playbook
+(compose table, drill bounds, paid-lens budget) lives in the skill's
+INVESTIGATE MODE section; the knobs and the eval harness are in
+[CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
 
 Before it searches, investigate decomposes the person's broad question into
 the decision, the then/now delta, the hidden entities, and the changes that
@@ -276,6 +283,36 @@ answer, normalized citation receipts showing what entered each score, run ID,
 state, timing, processor, and the published price basis. Files are replaced
 atomically with private permissions, and all recorded paths inside the bundle
 are relative. Omit the flag to retain the original lightweight eval behavior.
+
+### First official Researcher vs Parallel benchmark
+
+The benchmark controller freezes the five-question English suite before any
+answer exists, snapshots a completed investigate run, gates one Parallel Ultra
+attempt, creates blind A/B material, and derives a result only after both the AI
+audit and owner scores are complete:
+
+```bash
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" init \
+    --confirm-price-checked
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" snapshot-researcher \
+    --bundle research/duel-v1-... --question q01 --run-dir RUN_DIR
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" run-parallel \
+    --bundle research/duel-v1-... --question q01
+```
+
+The last command is a no-network cost/readiness preview. A paid attempt requires
+a separate `--confirm-paid` after its Researcher answer is frozen; a stored key,
+suite approval, price check, or previous question never grants reusable consent.
+Only a recorded technical failure permits `--retry-technical`, and every attempt
+is preserved. Runtime bundles stay in ignored `research/` with private atomic
+files; questions, rubric, code, and synthetic tests are the only committed data.
+Before a Researcher snapshot is accepted, every paid `manifest.calls[]` receipt
+must carry an actual or estimated USD amount, or an unavailable state reconciled
+to a conservative USD cost entry by `call_id`; all such amounts count toward the
+USD 10 cap. Each AI audit uses a claim ledger with citation-fit, fact date,
+freshness, support status, and evidence note rather than three unchecked
+completion flags. The first result is internal and the tool never publishes or
+merges it.
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`

@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "suite_id": "duel-v1",
+  "title": "Researcher vs Parallel: first official live duel",
+  "language": "en",
+  "questions": [
+    {
+      "id": "q01",
+      "kind": "practical-social",
+      "text": "As an independent AI builder aiming to build an English-language reputation in 2026, should I invest seriously in X, and which current practices produce qualified relationships rather than vanity reach? What changed since 2023?"
+    },
+    {
+      "id": "q02",
+      "kind": "practical-technical",
+      "text": "For a production coding or AI agent in 2026, when should a team choose Mem0, Letta, or a custom memory layer? What failure modes are practitioners actually seeing, and which remain unresolved?"
+    },
+    {
+      "id": "q03",
+      "kind": "practical-market",
+      "text": "What kinds of AI decision and architecture clarity are companies demonstrably paying for in 2026, how do buyers describe the pain in their own words, and which needs remain poorly served?"
+    },
+    {
+      "id": "q04",
+      "kind": "web-first-control",
+      "text": "Using current primary documentation only, compare the pricing, latency, data handling, privacy, and operational limits of Parallel Task API, Perplexity Sonar/API, and OpenAI web-search/research APIs for an agent product."
+    },
+    {
+      "id": "q05",
+      "kind": "scientific-control",
+      "text": "What do primary 2025–2026 studies actually establish about long-term memory in LLM agents? Where do benchmarks disagree, and which important claims remain unproven?"
+    }
+  ],
+  "researcher": {
+    "mode": "investigate",
+    "max_drill_rounds": 4,
+    "collection_boundary": "own runner and configured lens providers only",
+    "freeze_before_parallel": [
+      "research-plan.md",
+      "raw results",
+      "manifest.json",
+      "synthesis.md"
+    ]
+  },
+  "parallel": {
+    "processor": "ultra",
+    "published_price": {
+      "currency": "USD",
+      "amount_per_successful_run": 0.3,
+      "five_run_total": 1.5,
+      "verified_on": "2026-08-14",
+      "basis": "published Task API price: USD 300 per 1,000 Ultra runs; successful runs only",
+      "pricing_source": "https://docs.parallel.ai/getting-started/pricing",
+      "processor_source": "https://docs.parallel.ai/task-api/guides/choose-a-processor"
+    }
+  },
+  "budgets": {
+    "currency": "USD",
+    "parallel_max": 1.5,
+    "researcher_max": 10.0
+  },
+  "rubric": {
+    "score_min": 0,
+    "score_max": 4,
+    "dimensions": [
+      "usefulness",
+      "correctness",
+      "evidence_fit",
+      "freshness",
+      "uncertainty_honesty"
+    ]
+  },
+  "rules": {
+    "one_successful_run_per_participant_per_question": true,
+    "technical_retry_only": true,
+    "poor_answer_is_not_technical_failure": true,
+    "all_official_attempts_within_hours": 24,
+    "per_question_win_margin": 3,
+    "critical_decision_changing_error_vetoes_win": true,
+    "overall_wins_required": 3,
+    "cost_and_time_outside_quality_score": true,
+    "internal_only": true,
+    "paid_execution_requires_separate_confirmation": true
+  }
+}
