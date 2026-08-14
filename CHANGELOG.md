@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- **Paid Parallel baseline, explicit only.** A stored researcher run can now be
+  compared with Parallel's Task API on the same depth, freshness, and native
+  social axes. `--baseline parallel` is the only activation path; a configured
+  key alone never spends. The CLI names the selected processor and verified
+  list price before the call, restricts selection to the priced pro/ultra
+  deep-research variants, and persists that price basis in `eval-log.jsonl`.
+- **Reproducible paid-run receipts.** Optional `--artifact-dir` persistence now
+  keeps the full Parallel response, readable answer, normalized counted and
+  excluded citations, run ID/state/timing, processor, and published price
+  basis. Bundle paths stay relative; files are atomically written with private
+  permissions and scrubbed of keys and personal absolute paths.
+- **Honest comparison failures.** Missing keys, failed starts, timeouts, and
+  empty results remain explicit unavailable states while the researcher side
+  is still scored. Parallel's undated citations remain `unknown`, never
+  artificially fresh or zero.
+- **Two real-duel scorer fixes.** Structured citation lists (`excerpts`) now
+  count like singular excerpts without duplicate inflation, and corporate
+  help/docs/blog pages on social domains no longer masquerade as native social
+  conversation. YouTube spoken-content evidence is counted consistently with
+  the existing provenance model.
+- **Claims are dated and graded before synthesis.** Investigate now decomposes
+  vague human questions, marks load-bearing claims T1-T4 using the date of the
+  fact, bars T4 from support, and moves claims older than 12 months without
+  current T1/T2 confirmation into an explicit stale/historical section.
+- **Spec Kit initialized.** The repository now carries a versioned constitution,
+  living spec/plan/tasks, and Codex workflow skills. This is unreleased work:
+  no package version, npm publication, or marketplace release is included.
+
 ## 0.5.0 — 2026-08-06
 
 YouTube as a real source, three transcription routes, and the first release

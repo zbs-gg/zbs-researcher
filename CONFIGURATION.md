@@ -109,7 +109,7 @@ File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
 `openrouter-key.txt` (LLM lenses **and** transcription), `groq-key.txt`,
 `meta-ads-token.txt`,
 `producthunt-token.txt`, `scrapecreators-key.txt`, `threads-access-token.txt`,
-`telegram-api-id.txt`,
+`parallel-key.txt`, `telegram-api-id.txt`,
 `telegram-api-hash.txt`. Each file may hold the bare key or a `KEY = value`
 line — the first match wins. Env vars take over when no file is found.
 
@@ -188,12 +188,51 @@ python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" --beast-dir RUN_DIR
 Scores an existing run against a free web-index baseline on three axes —
 primary-source depth (distinct quoted threads), freshness (median item age
 in hours), native social coverage — and appends one JSON row to
-`eval-log.jsonl` beside the run. The baseline is a Brave Search `site:`
-pass: `BRAVE_API_KEY` (or `brave-key.txt` in the secrets dir) is
+`eval-log.jsonl` beside the run. The default baseline is a Brave Search
+`site:` pass: `BRAVE_API_KEY` (or `brave-key.txt` in the secrets dir) is
 **optional** — without it the baseline row honestly reads
 `unavailable - no web-index key configured`, the run side still scores,
-and no network call is made. A richer paid baseline (`PARALLEL_API_KEY`)
-is an opt-in hook only, never required.
+and no network call is made.
+
+### Paid baseline: Parallel deep research (opt-in)
+
+```bash
+python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" \
+    --beast-dir RUN_DIR --baseline parallel --processor ultra \
+    --artifact-dir PRIVATE_ARTIFACT_DIR
+```
+
+Runs the same question through Parallel's deep-research Task API and scores
+it on the same three axes. Key: `parallel-key.txt` in the secrets dir or
+`PARALLEL_API_KEY`; it travels in the `x-api-key` header only.
+
+**A configured key is not consent to spend it.** The paid baseline fires only
+on an explicit `--baseline parallel` — the default stays free even when the
+key is sitting right there, and the harness says so in its output. The list
+price of the chosen processor is printed *before* the call (`ultra` $0.30,
+`pro` $0.10 per run; the vendor bills successful runs only).
+
+Those prices are the official list-price snapshot verified on 2026-08-14; the
+vendor's current bill remains the source of truth. The CLI accepts only the
+four priced deep-research choices (`pro`, `pro-fast`, `ultra`, `ultra-fast`),
+so an unknown or higher-cost processor cannot slip through on a warning.
+
+Parallel currently documents 5-25 minutes for `ultra`; the harness keeps a
+wider 45-minute hard stop for queue and polling delays. A run that does not
+finish in that window is reported as `unavailable - parallel did not finish...`
+rather than scored as a zero — an opponent that timed out has not lost on the
+merits. Parallel does not date its citations, so its freshness axis reads
+`unknown` instead of guessing. The JSONL row records the selected processor and
+the published per-run list price separately from the unknown final bill.
+
+`--artifact-dir` closes the audit trail for a real duel. It writes the complete
+Parallel result, a readable Markdown answer, normalized citation receipts with
+explicit counted/excluded reasons, and an outcome record containing run ID,
+UTC start/end, duration, final state, processor, list price, and the official
+pricing/processor references. Internal artifact names are relative; credential
+values and personal absolute paths are redacted. Each file is atomically
+replaced with mode `0600` and the directory is private on POSIX. The flag is
+rejected for the free web-index baseline, whose existing behavior is unchanged.
 
 ## Budget note
 
@@ -252,11 +291,15 @@ Non-connector components:
   `DEEP_RESEARCH_CARTOGRAPHER_URL` themselves (same shape as the signals
   relay: no shipped endpoint, no token, non-HTTPS refused, local append
   first, relay claimed only after a real 2xx).
-- **`eval_harness.py`**: its only network call is the web-index baseline —
-  the question text goes to `api.search.brave.com` **only** when
-  `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
-  baseline row reads "unavailable", the run side still scores, and no
-  network I/O happens.
+- **`eval_harness.py`**: the default web-index baseline sends the question text
+  to `api.search.brave.com` **only** when `BRAVE_API_KEY` / `brave-key.txt` is
+  configured. The optional Parallel baseline sends the same question text to
+  `api.parallel.ai/v1/tasks/runs` only after explicit
+  `--baseline parallel`; `PARALLEL_API_KEY` / `parallel-key.txt` travels in the
+  `x-api-key` header, never the URL or output. Without the selected provider's
+  key the baseline reads "unavailable", the run side still scores, and no
+  provider call is made. No result file, manifest, or prior research evidence
+  is sent to either baseline.
 - **Media backend** (`media_backend.py`, used by **youtube and tiktok-ig**):
   where audio bytes go depends on the resolved transcription route —
   `api.groq.com` (Groq Whisper — Groq's own OpenAI-*compatible* route, not
