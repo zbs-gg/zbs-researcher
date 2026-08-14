@@ -109,7 +109,7 @@ File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
 `openrouter-key.txt` (LLM lenses **and** transcription), `groq-key.txt`,
 `meta-ads-token.txt`,
 `producthunt-token.txt`, `scrapecreators-key.txt`, `threads-access-token.txt`,
-`telegram-api-id.txt`,
+`parallel-key.txt`, `telegram-api-id.txt`,
 `telegram-api-hash.txt`. Each file may hold the bare key or a `KEY = value`
 line — the first match wins. Env vars take over when no file is found.
 
@@ -211,11 +211,18 @@ key is sitting right there, and the harness says so in its output. The list
 price of the chosen processor is printed *before* the call (`ultra` $0.30,
 `pro` $0.10 per run; the vendor bills successful runs only).
 
-Deep research can take up to ~45 minutes. A run that does not finish in that
-window is reported as `unavailable - parallel did not finish...` rather than
-scored as a zero — an opponent that timed out has not lost on the merits.
-Parallel does not date its citations, so its freshness axis reads `unknown`
-instead of guessing.
+Those prices are the official list-price snapshot verified on 2026-08-14; the
+vendor's current bill remains the source of truth. The CLI accepts only the
+four priced deep-research choices (`pro`, `pro-fast`, `ultra`, `ultra-fast`),
+so an unknown or higher-cost processor cannot slip through on a warning.
+
+Parallel currently documents 5-25 minutes for `ultra`; the harness keeps a
+wider 45-minute hard stop for queue and polling delays. A run that does not
+finish in that window is reported as `unavailable - parallel did not finish...`
+rather than scored as a zero — an opponent that timed out has not lost on the
+merits. Parallel does not date its citations, so its freshness axis reads
+`unknown` instead of guessing. The JSONL row records the selected processor and
+the published per-run list price separately from the unknown final bill.
 
 ## Budget note
 
@@ -274,11 +281,15 @@ Non-connector components:
   `DEEP_RESEARCH_CARTOGRAPHER_URL` themselves (same shape as the signals
   relay: no shipped endpoint, no token, non-HTTPS refused, local append
   first, relay claimed only after a real 2xx).
-- **`eval_harness.py`**: its only network call is the web-index baseline —
-  the question text goes to `api.search.brave.com` **only** when
-  `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
-  baseline row reads "unavailable", the run side still scores, and no
-  network I/O happens.
+- **`eval_harness.py`**: the default web-index baseline sends the question text
+  to `api.search.brave.com` **only** when `BRAVE_API_KEY` / `brave-key.txt` is
+  configured. The optional Parallel baseline sends the same question text to
+  `api.parallel.ai/v1/tasks/runs` only after explicit
+  `--baseline parallel`; `PARALLEL_API_KEY` / `parallel-key.txt` travels in the
+  `x-api-key` header, never the URL or output. Without the selected provider's
+  key the baseline reads "unavailable", the run side still scores, and no
+  provider call is made. No result file, manifest, or prior research evidence
+  is sent to either baseline.
 - **Media backend** (`media_backend.py`, used by **youtube and tiktok-ig**):
   where audio bytes go depends on the resolved transcription route —
   `api.groq.com` (Groq Whisper — Groq's own OpenAI-*compatible* route, not

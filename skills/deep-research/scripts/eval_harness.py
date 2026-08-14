@@ -63,7 +63,8 @@ PARALLEL_PRICE_USD = {
     "pro": 0.10, "pro-fast": 0.10,
     "ultra": 0.30, "ultra-fast": 0.30,
 }
-# Deep research runs can take up to ~45 min; poll patiently but bounded.
+# Parallel currently documents 5-25 minutes for ultra. Keep a wider hard stop
+# for queue/polling slop, but never wait forever.
 PARALLEL_POLL_SECONDS = 15
 PARALLEL_DEADLINE_SECONDS = 45 * 60
 BASELINE_KINDS = ("web-index", "parallel")
@@ -429,6 +430,26 @@ def parallel_price_note(processor):
     )
 
 
+def baseline_cost_disclosure(baseline, processor):
+    """Durable cost context for one eval row; never pretend list price is bill."""
+    if baseline != "parallel":
+        return {
+            "currency": "USD",
+            "amount": None,
+            "basis": "not reported for web-index baseline",
+        }
+    amount = PARALLEL_PRICE_USD.get(processor)
+    return {
+        "currency": "USD",
+        "amount": amount,
+        "basis": (
+            "published list price per successful run"
+            if amount is not None
+            else "price unknown"
+        ),
+    }
+
+
 def _post_json(url, payload, headers=None, timeout=60):
     request = urllib.request.Request(
         url,
@@ -505,7 +526,8 @@ def _citation_excerpts(citation):
 
 
 def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
-                          sleep=None, deadline_seconds=None, now=None):
+                          sleep=None, deadline_seconds=None, now=None,
+                          announce=None):
     """Run ONE Parallel deep-research task and score it on the same three axes.
 
     Returns the scores dict, or an honest "unavailable - ..." string. Never
@@ -513,6 +535,11 @@ def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
     it. The key travels in the x-api-key header only — never in a URL, never
     in a failure string.
     """
+    if processor not in PARALLEL_DEEP_PROCESSORS:
+        return (
+            "unavailable - parallel processor is not an allowed priced "
+            f"deep-research choice ({processor})"
+        )
     key = _read_parallel_key()
     if not key:
         return (
@@ -523,11 +550,17 @@ def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
     fetch = fetch if fetch is not None else _get_json
     sleep = sleep if sleep is not None else time.sleep
     now = now if now is not None else time.monotonic
+    announce = announce if announce is not None else (
+        lambda message: print(message, file=sys.stderr)
+    )
     deadline_seconds = (
         PARALLEL_DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds
     )
     headers = {"x-api-key": key}
 
+    # Put the disclosure immediately before the spend so imports cannot bypass
+    # the CLI's safety boundary.
+    announce(parallel_price_note(processor))
     try:
         created = post(
             f"{PARALLEL_BASE_URL}/tasks/runs",
@@ -593,6 +626,8 @@ def run_eval(question, beast_dir, fetch=None, baseline="web-index",
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "question": question,
         "baseline_kind": baseline,
+        "baseline_processor": processor if baseline == "parallel" else None,
+        "baseline_cost": baseline_cost_disclosure(baseline, processor),
         "beast": score_beast_dir(beast_dir),
         "baseline": opponent,
     }
@@ -631,6 +666,11 @@ def format_table(row):
     if base_scores is None:
         lines.append("")
         lines.append(f"baseline: {baseline}")
+    cost = row.get("baseline_cost")
+    if kind == "parallel" and isinstance(cost, dict):
+        amount = cost.get("amount")
+        amount_text = "unknown" if amount is None else f"${amount:g}"
+        lines.append(f"parallel list price: {amount_text} ({cost.get('basis')})")
     return "\n".join(lines)
 
 
@@ -677,7 +717,7 @@ def main(argv=None):
              "is never selected just because a key is configured",
     )
     ap.add_argument(
-        "--processor", default="ultra",
+        "--processor", choices=PARALLEL_DEEP_PROCESSORS, default="ultra",
         help="Parallel processor for --baseline parallel (default: ultra)",
     )
     args = ap.parse_args(argv)
@@ -685,17 +725,6 @@ def main(argv=None):
     beast_dir = Path(args.beast_dir).expanduser()
     if not beast_dir.is_dir():
         ap.error(f"--beast-dir is not a directory: {beast_dir}")
-
-    if args.baseline == "parallel":
-        if args.processor not in PARALLEL_DEEP_PROCESSORS:
-            print(
-                f"note: {args.processor!r} is not one of Parallel's deep-research "
-                "processors (" + ", ".join(PARALLEL_DEEP_PROCESSORS) + ") — "
-                "the comparison may not be like-for-like",
-                file=sys.stderr,
-            )
-        # Cost is stated BEFORE the spend, not in the receipt afterwards.
-        print(parallel_price_note(args.processor), file=sys.stderr)
 
     row = run_eval(
         args.question, beast_dir,

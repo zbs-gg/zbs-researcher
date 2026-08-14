@@ -71,6 +71,11 @@ required_markers = {
         'SCRIPT="$SKILL_DIR/scripts/deep-research.py"',
         "not the pitch — quality is",
         "saved locally to inform the next run",
+        "STEP I-1 — DECOMPOSE",
+        "STEP I3.5 — DATE AND GRADE EVERY CLAIM",
+        "A date — of the FACT, not of the page",
+        "T4 — unsupported",
+        "older than **12 months**",
     ),
     "readme": (
         "complete skill-authored bundle",
@@ -120,6 +125,24 @@ if (
         "skill must order the investigate playbook as INVESTIGATE MODE -> "
         "compose hard rule (NEVER fire a blanket) -> --fire -> --coverage -> "
         "--feedback"
+    )
+
+# A synthesis may sound current while carrying dead claims. Preserve the
+# mandatory sequence that turns a vague question into dated, graded evidence
+# before the report is written.
+ordered_claim_markers = (
+    "STEP I-1 — DECOMPOSE",
+    "STEP I3.5 — DATE AND GRADE EVERY CLAIM",
+    "A date — of the FACT, not of the page",
+    "T4 — unsupported",
+    "older than **12 months**",
+    "STEP I4 — SYNTHESIZE",
+)
+claim_positions = [skill.find(marker) for marker in ordered_claim_markers]
+if any(position < 0 for position in claim_positions) or claim_positions != sorted(claim_positions):
+    problems.append(
+        "skill must decompose first, then date + tier claims, enforce T4 and "
+        "12-month staleness, and only then synthesize"
     )
 
 if "${CLAUDE_PLUGIN_ROOT}" in skill:

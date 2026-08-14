@@ -247,6 +247,29 @@ as "learned"). The full playbook (compose table, drill bounds, paid-lens
 budget) lives in the skill's INVESTIGATE MODE section; the knobs and the
 eval harness are in [CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
 
+Before it searches, investigate decomposes the person's broad question into
+the decision, the then/now delta, the hidden entities, and the changes that
+could overturn the answer. Before synthesis, every load-bearing claim gets the
+date of the fact — not merely the page date — and one proof tier: T1 primary,
+T2 first-hand numbers, T3 informed opinion, or T4 unsupported. T4 may be cited
+only to challenge a claim. Evidence older than 12 months without current T1/T2
+confirmation moves to an explicit stale/historical section instead of driving
+the recommendation; unresolved questions stay visible.
+
+The local eval harness can also compare a stored run with Parallel's paid deep
+research, but only by explicit choice:
+
+```bash
+python3 "$SKILL_DIR/scripts/eval_harness.py" "<same question>" \
+    --beast-dir RUN_DIR --baseline parallel --processor ultra
+```
+
+A configured key never triggers this baseline by itself. Both sides are scored
+on quoted-source depth, known freshness, and native social coverage; unavailable
+or undated evidence stays unavailable or unknown rather than becoming a fake
+zero. See [Configuration](CONFIGURATION.md#paid-baseline-parallel-deep-research-opt-in)
+for the provider, cost, and data boundary.
+
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
 reserves and prints a unique run containing only its `_topic.txt` marker. The

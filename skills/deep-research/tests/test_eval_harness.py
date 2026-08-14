@@ -375,6 +375,8 @@ class TestParallelIsNeverImplicit(unittest.TestCase):
 
         self.assertEqual(row["baseline_kind"], "web-index")
         self.assertEqual(row["baseline"], "unavailable - no web-index key configured")
+        self.assertIsNone(row["baseline_processor"])
+        self.assertIsNone(row["baseline_cost"]["amount"])
 
     def test_cli_default_stays_free_and_says_so(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -401,12 +403,14 @@ class TestParallelBaseline(unittest.TestCase):
             posted.append((url, payload, dict(headers or {})))
             return {"run_id": "run_abc"}
 
+        announce = kwargs.pop("announce", lambda _message: None)
         with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
             scores = eval_harness.run_parallel_baseline(
                 "how to run twitter now",
                 post=post or fake_post,
                 fetch=lambda url, headers=None, timeout=20: result,
                 sleep=lambda _s: None,
+                announce=announce,
                 **kwargs,
             )
         return scores, posted
@@ -484,6 +488,27 @@ class TestParallelBaseline(unittest.TestCase):
             scores, _ = self._run(tmp, result)
         self.assertEqual(scores["depth"], 2)
 
+    def test_duplicate_excerpt_shapes_do_not_inflate_depth(self):
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{"citations": [
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpt": "the same first-hand report",
+                        "excerpts": ["the same first-hand report"],
+                    },
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpts": ["a second excerpt from the same thread"],
+                    },
+                ]}],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 1)
+
     def test_a_citation_with_no_excerpt_is_a_pointer_not_evidence(self):
         result = {
             "output": {
@@ -506,7 +531,8 @@ class TestParallelBaseline(unittest.TestCase):
             empty.mkdir()
             with unittest.mock.patch.dict(os.environ, _parallel_env(empty)):
                 scores = eval_harness.run_parallel_baseline(
-                    "q", post=boom, fetch=boom, sleep=boom
+                    "q", post=boom, fetch=boom, sleep=boom,
+                    announce=lambda _message: None,
                 )
         self.assertIsInstance(scores, str)
         self.assertIn("no parallel key", scores)
@@ -537,6 +563,7 @@ class TestParallelBaseline(unittest.TestCase):
                     fetch=never_ready,
                     sleep=lambda _s: None,
                     now=lambda: next(clock),
+                    announce=lambda _message: None,
                 )
         self.assertIsInstance(scores, str)
         self.assertIn("did not finish", scores)
@@ -547,10 +574,36 @@ class TestParallelBaseline(unittest.TestCase):
         self.assertIsInstance(scores, str)
         self.assertIn("empty result", scores)
 
-    def test_price_is_stated_before_the_call(self):
-        note = eval_harness.parallel_price_note("ultra")
-        self.assertIn("$0.3", note)
-        self.assertIn("ultra", note)
+    def test_price_is_stated_immediately_before_the_call(self):
+        events = []
+
+        def announce(note):
+            self.assertIn("$0.3", note)
+            self.assertIn("ultra", note)
+            events.append("price")
+
+        def post(*args, **kwargs):
+            events.append("post")
+            return {"run_id": "r"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._run(
+                tmp,
+                {"output": {"content": "answer"}},
+                post=post,
+                announce=announce,
+            )
+        self.assertEqual(events, ["price", "post"])
+
+    def test_direct_call_rejects_unpriced_processor_without_network(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("paid call attempted for an unpriced processor")
+
+        result = eval_harness.run_parallel_baseline(
+            "q", processor="ultra8x", post=boom, fetch=boom, sleep=boom,
+            announce=boom,
+        )
+        self.assertIn("not an allowed priced", result)
 
     def test_sub_cent_prices_are_not_rounded_up(self):
         """At two decimals a $0.005 run prints as "$0.01" — a small lie about
@@ -561,15 +614,52 @@ class TestParallelBaseline(unittest.TestCase):
     def test_unknown_processor_says_unknown_rather_than_guessing(self):
         self.assertIn("price unknown", eval_harness.parallel_price_note("zzz"))
 
+    def test_cli_rejects_unpriced_processor_before_any_paid_call(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("paid call attempted for an unpriced processor")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            with unittest.mock.patch.object(eval_harness, "_post_json", boom), \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                eval_harness.main([
+                    "q", "--beast-dir", str(run),
+                    "--baseline", "parallel", "--processor", "ultra8x",
+                ])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_table_names_the_opponent_that_actually_ran(self):
         row = {
             "question": "q", "baseline_kind": "parallel",
+            "baseline_cost": {
+                "currency": "USD", "amount": 0.3,
+                "basis": "published list price per successful run",
+            },
             "beast": {"depth": 5, "freshness_hours": 2.0, "social_coverage": 4},
             "baseline": {"depth": 3, "freshness_hours": None, "social_coverage": 1},
         }
         table = eval_harness.format_table(row)
         self.assertIn("Beast vs parallel baseline", table)
         self.assertNotIn("web-index", table)
+        self.assertIn("parallel list price: $0.3", table)
+
+    def test_parallel_row_records_processor_and_list_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            scores = {"depth": 1, "freshness_hours": None, "social_coverage": 1}
+            with unittest.mock.patch.object(
+                eval_harness, "run_parallel_baseline", return_value=scores
+            ):
+                row = eval_harness.run_eval(
+                    "q", run, baseline="parallel", processor="pro"
+                )
+        self.assertEqual(row["baseline_processor"], "pro")
+        self.assertEqual(row["baseline_cost"]["amount"], 0.10)
+        self.assertEqual(
+            row["baseline_cost"]["basis"],
+            "published list price per successful run",
+        )
 
 
 class TestEvalLog(unittest.TestCase):
