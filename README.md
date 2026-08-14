@@ -277,6 +277,30 @@ state, timing, processor, and the published price basis. Files are replaced
 atomically with private permissions, and all recorded paths inside the bundle
 are relative. Omit the flag to retain the original lightweight eval behavior.
 
+### First official Researcher vs Parallel benchmark
+
+The benchmark controller freezes the five-question English suite before any
+answer exists, snapshots a completed investigate run, gates one Parallel Ultra
+attempt, creates blind A/B material, and derives a result only after both the AI
+audit and owner scores are complete:
+
+```bash
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" init \
+    --confirm-price-checked
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" snapshot-researcher \
+    --bundle research/duel-v1-... --question q01 --run-dir RUN_DIR
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" run-parallel \
+    --bundle research/duel-v1-... --question q01
+```
+
+The last command is a no-network cost/readiness preview. A paid attempt requires
+a separate `--confirm-paid` after its Researcher answer is frozen; a stored key,
+suite approval, price check, or previous question never grants reusable consent.
+Only a recorded technical failure permits `--retry-technical`, and every attempt
+is preserved. Runtime bundles stay in ignored `research/` with private atomic
+files; questions, rubric, code, and synthetic tests are the only committed data.
+The first result is internal and the tool never publishes or merges it.
+
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
 reserves and prints a unique run containing only its `_topic.txt` marker. The

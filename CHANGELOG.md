@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Private five-question duel controller.** The first official Researcher vs
+  Parallel benchmark now has a frozen English suite and `init`,
+  `snapshot-researcher`, `run-parallel`, `blind`, and `report` commands. It
+  preserves raw attempts, gates current-price acknowledgment separately from
+  per-call paid consent, allows only technical retries, and fails closed on
+  incomplete blind audits or scores. Runtime answers stay ignored and private;
+  nothing is published or merged automatically.
 - **Paid Parallel baseline, explicit only.** A stored researcher run can now be
   compared with Parallel's Task API on the same depth, freshness, and native
   social axes. `--baseline parallel` is the only activation path; a configured

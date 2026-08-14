@@ -22,7 +22,7 @@ This project is Nikita's proving ground for beating Parallel on research quality
 - `skills/deep-research/scripts/detect_state.py` — SessionStart hook (registered in the root `hooks/hooks.json`): emits JSON with boolean providers, never prints key values.
 - `skills/deep-research/scripts/entity_fanout.py` — entity-fanout mode (enumerate → per-entity fan-out → matrix).
 - `skills/deep-research/scripts/provenance.py` — web-index reachability + coverage-receipts (investigate mode).
-- `skills/deep-research/scripts/investigate_feedback.py` — feedback ledger + Cartographer soft-plug; `eval_harness.py` — Beast vs free web-index or explicitly selected paid Parallel baseline.
+- `skills/deep-research/scripts/investigate_feedback.py` — feedback ledger + Cartographer soft-plug; `eval_harness.py` — Beast vs free web-index or explicitly selected paid Parallel baseline; `duel_benchmark.py` — private five-question init/snapshot/paid-gate/blind/report controller.
 - `skills/deep-research/tests/` — unittest suite.
 - `specs/` — living Spec Kit feature artifacts; active feature is selected in `.specify/feature.json`.
 - `docs/plans/` — historical pre-Spec-Kit plans, including investigate and entity-fanout.

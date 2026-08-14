@@ -234,6 +234,42 @@ values and personal absolute paths are redacted. Each file is atomically
 replaced with mode `0600` and the directory is private on POSIX. The flag is
 rejected for the free web-index baseline, whose existing behavior is unchanged.
 
+### Five-question live duel controller (internal)
+
+```bash
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" init \
+    --confirm-price-checked
+```
+
+Initialization copies the committed `benchmarks/duel-v1.json` into an ignored
+private bundle, records its digest, git SHA, Python/plugin versions, USD 1.50
+Parallel and USD 10 Researcher caps, provider-availability booleans, and a
+24-hour deadline. Each lens also records whether it is direct, an OpenRouter
+fallback, a Telegram client session, or a pay-per-use vendor route. The probe
+reuses Researcher's own offline detector, so it does not drift from runtime key
+and session resolution. `--confirm-price-checked` means the operator has just opened
+the official Parallel price and processor pages. It records no secret, performs
+no provider request, and sets `paid_authorized: false`.
+
+The workflow is `snapshot-researcher` → `run-parallel` → `blind` → manual AI
+audit and owner scoring → `report`. `run-parallel` without `--confirm-paid`
+prints Ultra, USD 0.30, remaining budget, and readiness, then exits without a
+call. With confirmation it can run only after that question's Researcher plan,
+manifest, raw evidence, and synthesis are frozen. Completed answers cannot be
+rerun; `--retry-technical` is legal only after a preserved technical failure.
+An incomplete Researcher attempt is preserved with
+`snapshot-researcher --technical-failure-reason "..."`; the command rejects a
+completed but disappointing answer and keeps cumulative reported vendor spend
+within the USD 10 Researcher cap.
+
+`blind` writes neutral A/B Markdown, a private mapping, and incomplete audit and
+judgment forms. `report` refuses missing checks or scores, applies the three-
+point per-question margin and critical-error veto, and requires three question
+wins overall. Objective depth/freshness/social coverage, time, and cost stay
+outside the five quality scores. Runtime paths are relative inside mode-0600
+files under the mode-0700 ignored bundle. No command publishes, uploads, merges,
+or consults monid.
+
 ## Budget note
 
 The default run bills **no Anthropic and no OpenAI** API. Retrieval is
