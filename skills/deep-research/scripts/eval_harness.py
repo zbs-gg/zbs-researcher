@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -47,12 +48,25 @@ BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 BASELINE_PAGE_SIZE = 5
 BASELINE_UNAVAILABLE_NO_KEY = "unavailable - no web-index key configured"
 
-# --- Optional richer baseline: Parallel API (opt-in stub, NOT implemented) ---
-# A key in PARALLEL_API_KEY signals the operator wants a richer paid baseline
-# comparison someday. Deliberately unimplemented: the eval must run free, and
-# a paid call may never become a prerequisite. When the env var is set, main()
-# prints one honest note and still runs the free web-index baseline only.
+# --- Optional richer baseline: Parallel API (OPT-IN, never a prerequisite) ---
+# The eval must run free. A configured key is NOT consent to spend it, so the
+# paid baseline fires only on an explicit `--baseline parallel`; the default
+# stays the free web-index pass even when the key is right there. That rule is
+# the whole reason this stayed a stub for a release, and it still holds.
 PARALLEL_API_ENV_VAR = "PARALLEL_API_KEY"
+PARALLEL_BASE_URL = "https://api.parallel.ai/v1"
+PARALLEL_DEEP_PROCESSORS = ("pro", "pro-fast", "ultra", "ultra-fast")
+# Published list price per single run, for the cost line printed BEFORE the
+# call. Informational only — the vendor's bill is the source of truth.
+PARALLEL_PRICE_USD = {
+    "lite": 0.005, "base": 0.01, "core": 0.025,
+    "pro": 0.10, "pro-fast": 0.10,
+    "ultra": 0.30, "ultra-fast": 0.30,
+}
+# Deep research runs can take up to ~45 min; poll patiently but bounded.
+PARALLEL_POLL_SECONDS = 15
+PARALLEL_DEADLINE_SECONDS = 45 * 60
+BASELINE_KINDS = ("web-index", "parallel")
 
 # Native social/community platforms (the coverage axis). Keys are the tokens a
 # source may arrive as — connector names, bare domains, or full URLs (hosts are
@@ -79,6 +93,13 @@ _PLATFORM_TOKENS = {
     "bluesky": ("bluesky",),
     "bsky": ("bluesky",),
     "bsky.app": ("bluesky",),
+    # YouTube counts for the SPOKEN content the youtube connector reads: a web
+    # index gets titles and descriptions, never what was said. Same judgement
+    # the provenance table makes when it files youtube under "partial"; the two
+    # modules must not disagree about which sources an index can reach.
+    "youtube": ("youtube",),
+    "youtube.com": ("youtube",),
+    "youtu.be": ("youtube",),
 }
 
 
@@ -157,6 +178,15 @@ def score_freshness(ages_hours):
     return (known[mid - 1] + known[mid]) / 2.0
 
 
+# A platform's own documentation is not that platform's conversation.
+# help.x.com is a corporate publication a web index has in full; counting it
+# as "reached X natively" would credit reading the manual as reading the room.
+_CORPORATE_SUBDOMAINS = frozenset({
+    "help", "support", "about", "blog", "docs", "developer", "developers",
+    "business", "status", "legal", "policy", "press", "careers", "investor",
+})
+
+
 def _platforms_for(source):
     """Map one source token (connector name, domain, or URL) to the native
     platform(s) it reaches; () for plain web pages."""
@@ -166,6 +196,9 @@ def _platforms_for(source):
     token = token.split("/", 1)[0]
     if token.startswith("www."):
         token = token[4:]
+    head = token.split(".", 1)[0]
+    if "." in token and head in _CORPORATE_SUBDOMAINS:
+        return ()
     candidates = [token]
     if "." in token:  # subdomain hosts (old.reddit.com) match their tail
         candidates.append(".".join(token.split(".")[-2:]))
@@ -367,15 +400,201 @@ def run_baseline(question, fetch=None):
 
 
 # ---------------------------------------------------------------------------
+# Paid baseline — Parallel deep research (opt-in only)
+# ---------------------------------------------------------------------------
+def _read_parallel_key():
+    """Same file-then-env contract as every other key in this project."""
+    path = _default_secrets_dir() / "parallel-key.txt"
+    if path.exists():
+        raw = path.read_text().strip()
+        match = re.search(r"[A-Za-z0-9_\-]{12,}", raw)
+        if match:
+            return match.group(0)
+        if raw:
+            return raw
+    return os.environ.get(PARALLEL_API_ENV_VAR, "").strip()
+
+
+def parallel_price_note(processor):
+    """One human line about what the next call costs, printed BEFORE it runs."""
+    price = PARALLEL_PRICE_USD.get(processor)
+    if price is None:
+        return f"parallel baseline: processor {processor!r} — price unknown"
+    # Enough decimals to state the real number: at two places a $0.005 run
+    # prints as "$0.01", which is a lie about money, however small.
+    amount = f"{price:.3f}".rstrip("0").rstrip(".")
+    return (
+        f"parallel baseline: one {processor} run, list price ${amount} "
+        "(vendor bills successful runs only)"
+    )
+
+
+def _post_json(url, payload, headers=None, timeout=60):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "User-Agent": UA,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **(headers or {}),
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
+
+
+def _parallel_text(result):
+    """Flatten Parallel's result into the markdown-ish text the scorer reads.
+
+    Both output shapes are handled: `text` hands back a report with inline
+    citations, `auto` hands back structured content plus a citations list. We
+    append the citation URLs so a structured answer is not scored as evidence-
+    free just because its links live in a sibling field.
+    """
+    if not isinstance(result, dict):
+        return ""
+    output = result.get("output")
+    if isinstance(output, dict):
+        content = output.get("content")
+        basis = output.get("basis")
+    else:
+        content, basis = output, None
+    parts = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif content is not None:
+        parts.append(json.dumps(content, ensure_ascii=False, indent=2))
+    for entry in basis or []:
+        if not isinstance(entry, dict):
+            continue
+        for citation in entry.get("citations") or []:
+            if not isinstance(citation, dict):
+                continue
+            url = citation.get("url")
+            if not url:
+                continue
+            # The live API returns `excerpts` (a LIST). Reading only a singular
+            # `excerpt` silently dropped every quote the opponent supplied and
+            # scored them at zero depth — a rigged benchmark. Accept both.
+            for excerpt in _citation_excerpts(citation):
+                parts.append(f"- {url}\n  \"{excerpt}\"")
+            if not _citation_excerpts(citation):
+                parts.append(f"- {url}")
+    return "\n".join(parts)
+
+
+def _citation_excerpts(citation):
+    """Quoted excerpts attached to one citation, whatever shape they arrive in.
+
+    Parallel sends `excerpts: [...]`; a singular `excerpt` string is accepted
+    too so neither spelling is silently ignored.
+    """
+    raw = citation.get("excerpts")
+    if isinstance(raw, str):
+        candidates = [raw]
+    elif isinstance(raw, (list, tuple)):
+        candidates = list(raw)
+    else:
+        candidates = []
+    single = citation.get("excerpt")
+    if isinstance(single, str):
+        candidates.append(single)
+    return [" ".join(str(c).split()) for c in candidates if str(c).strip()]
+
+
+def run_parallel_baseline(question, processor="ultra", post=None, fetch=None,
+                          sleep=None, deadline_seconds=None, now=None):
+    """Run ONE Parallel deep-research task and score it on the same three axes.
+
+    Returns the scores dict, or an honest "unavailable - ..." string. Never
+    raises: a baseline that fell over must not take the Beast side down with
+    it. The key travels in the x-api-key header only — never in a URL, never
+    in a failure string.
+    """
+    key = _read_parallel_key()
+    if not key:
+        return (
+            "unavailable - no parallel key configured "
+            f"(parallel-key.txt or {PARALLEL_API_ENV_VAR})"
+        )
+    post = post if post is not None else _post_json
+    fetch = fetch if fetch is not None else _get_json
+    sleep = sleep if sleep is not None else time.sleep
+    now = now if now is not None else time.monotonic
+    deadline_seconds = (
+        PARALLEL_DEADLINE_SECONDS if deadline_seconds is None else deadline_seconds
+    )
+    headers = {"x-api-key": key}
+
+    try:
+        created = post(
+            f"{PARALLEL_BASE_URL}/tasks/runs",
+            {
+                "input": question,
+                "processor": processor,
+                "task_spec": {"output_schema": {"type": "text"}},
+            },
+            headers=headers,
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade, never kill the eval
+        return f"unavailable - parallel run could not start ({type(exc).__name__})"
+
+    run_id = (created or {}).get("run_id") or (created or {}).get("id")
+    if not run_id:
+        return "unavailable - parallel returned no run id"
+
+    stop_at = now() + deadline_seconds
+    result = None
+    while True:
+        try:
+            result = fetch(
+                f"{PARALLEL_BASE_URL}/tasks/runs/{run_id}/result", headers=headers
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 — still running, or a blip
+            if now() >= stop_at:
+                return (
+                    "unavailable - parallel did not finish within "
+                    f"{int(deadline_seconds / 60)} min ({type(exc).__name__})"
+                )
+            sleep(PARALLEL_POLL_SECONDS)
+
+    text = _parallel_text(result)
+    if not text.strip():
+        return "unavailable - parallel returned an empty result"
+    items = extract_evidence(text)
+    return {
+        "depth": score_depth(items),
+        "freshness_hours": None,  # Parallel does not date its citations
+        "social_coverage": score_social_coverage(it["url"] for it in items),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Comparison + eval log
 # ---------------------------------------------------------------------------
-def run_eval(question, beast_dir, fetch=None):
-    """Score both sides; return the eval row {ts, question, beast, baseline}."""
+def run_eval(question, beast_dir, fetch=None, baseline="web-index",
+             processor="ultra", post=None):
+    """Score both sides; return the eval row {ts, question, beast, baseline}.
+
+    `baseline` selects which opponent runs. It defaults to the FREE web-index
+    pass; "parallel" is opt-in and spends money, so nothing but an explicit
+    caller choice may select it.
+    """
+    if baseline == "parallel":
+        opponent = run_parallel_baseline(
+            question, processor=processor, post=post, fetch=fetch
+        )
+    else:
+        opponent = run_baseline(question, fetch=fetch)
     return {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "question": question,
+        "baseline_kind": baseline,
         "beast": score_beast_dir(beast_dir),
-        "baseline": run_baseline(question, fetch=fetch),
+        "baseline": opponent,
     }
 
 
@@ -392,11 +611,14 @@ def format_table(row):
     beast = row["beast"]
     baseline = row["baseline"]
     base_scores = baseline if isinstance(baseline, dict) else None
+    # Name the opponent that actually ran — a table headed "web-index" while a
+    # paid Parallel run produced the numbers would misread at a glance.
+    kind = row.get("baseline_kind") or "web-index"
     lines = [
-        "Eval — Beast vs web-index baseline",
+        f"Eval — Beast vs {kind} baseline",
         f"question: {row['question']}",
         "",
-        f"{'axis':<30}{'beast':>10}{'web-index':>12}",
+        f"{'axis':<30}{'beast':>10}{kind:>12}",
     ]
     axes = [
         ("depth (quoted threads)", "depth"),
@@ -448,23 +670,47 @@ def main(argv=None):
         help="eval-log destination: a *.jsonl file or a directory "
              "(default: eval-log.jsonl inside --beast-dir)",
     )
+    ap.add_argument(
+        "--baseline", choices=BASELINE_KINDS, default="web-index",
+        help="which opponent to run: 'web-index' is free (default); "
+             "'parallel' SPENDS MONEY on the Parallel deep-research API and "
+             "is never selected just because a key is configured",
+    )
+    ap.add_argument(
+        "--processor", default="ultra",
+        help="Parallel processor for --baseline parallel (default: ultra)",
+    )
     args = ap.parse_args(argv)
 
     beast_dir = Path(args.beast_dir).expanduser()
     if not beast_dir.is_dir():
         ap.error(f"--beast-dir is not a directory: {beast_dir}")
 
-    row = run_eval(args.question, beast_dir)
+    if args.baseline == "parallel":
+        if args.processor not in PARALLEL_DEEP_PROCESSORS:
+            print(
+                f"note: {args.processor!r} is not one of Parallel's deep-research "
+                "processors (" + ", ".join(PARALLEL_DEEP_PROCESSORS) + ") — "
+                "the comparison may not be like-for-like",
+                file=sys.stderr,
+            )
+        # Cost is stated BEFORE the spend, not in the receipt afterwards.
+        print(parallel_price_note(args.processor), file=sys.stderr)
+
+    row = run_eval(
+        args.question, beast_dir,
+        baseline=args.baseline, processor=args.processor,
+    )
     ledger = resolve_ledger_path(args.out, beast_dir)
     ledger.parent.mkdir(parents=True, exist_ok=True)
     _append_jsonl_line(ledger, row)
 
     print(format_table(row))
     print(f"\neval row appended: {ledger}")
-    if os.environ.get(PARALLEL_API_ENV_VAR, "").strip():
+    if args.baseline != "parallel" and _read_parallel_key():
         print(
-            "note: PARALLEL_API_KEY is set, but the Parallel richer baseline "
-            "is not implemented yet — opt-in hook only, never required."
+            "note: a Parallel key is configured but was NOT used — the eval "
+            "stays free unless you pass --baseline parallel."
         )
     return 0
 

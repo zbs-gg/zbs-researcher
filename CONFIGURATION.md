@@ -188,12 +188,34 @@ python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" --beast-dir RUN_DIR
 Scores an existing run against a free web-index baseline on three axes —
 primary-source depth (distinct quoted threads), freshness (median item age
 in hours), native social coverage — and appends one JSON row to
-`eval-log.jsonl` beside the run. The baseline is a Brave Search `site:`
-pass: `BRAVE_API_KEY` (or `brave-key.txt` in the secrets dir) is
+`eval-log.jsonl` beside the run. The default baseline is a Brave Search
+`site:` pass: `BRAVE_API_KEY` (or `brave-key.txt` in the secrets dir) is
 **optional** — without it the baseline row honestly reads
 `unavailable - no web-index key configured`, the run side still scores,
-and no network call is made. A richer paid baseline (`PARALLEL_API_KEY`)
-is an opt-in hook only, never required.
+and no network call is made.
+
+### Paid baseline: Parallel deep research (opt-in)
+
+```bash
+python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" \
+    --beast-dir RUN_DIR --baseline parallel --processor ultra
+```
+
+Runs the same question through Parallel's deep-research Task API and scores
+it on the same three axes. Key: `parallel-key.txt` in the secrets dir or
+`PARALLEL_API_KEY`; it travels in the `x-api-key` header only.
+
+**A configured key is not consent to spend it.** The paid baseline fires only
+on an explicit `--baseline parallel` — the default stays free even when the
+key is sitting right there, and the harness says so in its output. The list
+price of the chosen processor is printed *before* the call (`ultra` $0.30,
+`pro` $0.10 per run; the vendor bills successful runs only).
+
+Deep research can take up to ~45 minutes. A run that does not finish in that
+window is reported as `unavailable - parallel did not finish...` rather than
+scored as a zero — an opponent that timed out has not lost on the merits.
+Parallel does not date its citations, so its freshness axis reads `unknown`
+instead of guessing.
 
 ## Budget note
 
