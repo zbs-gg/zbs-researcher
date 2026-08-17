@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0 — 2026-08-09
+
+Research that checks whether an answer is true, not just whether it sounds good.
+
+- **Claim grading and a staleness pass** (`SKILL.md` STEP I3.5). Every
+  load-bearing claim now carries the date of the FACT (not the page) and a
+  proof tier T1-T4, where T4 — clickbait, undated, unattributed — may be cited
+  only to be knocked down. A claim older than 12 months without fresh
+  confirmation cannot be load-bearing. Reports gain a mandatory "what people
+  repeat that is no longer true" section.
+- **Vague questions are taken as given** (STEP I-1). The loop decomposes
+  "how do I run a Twitter account now" into then / now / what-changed itself
+  instead of asking for a better-formed query. A tool that needs a clean query
+  is a search box.
+- **Parallel deep research as an opt-in baseline** in the eval harness
+  (`--baseline parallel`). A configured key is never consent to spend it: the
+  default stays the free web-index pass, and the harness says so.
+- Scorer fixes found by running a real duel: the live API's `excerpts` field
+  was being dropped (scoring an opponent's quotes at zero), and a platform's
+  own help centre counted as reaching that platform natively. Both corrected
+  against our own interest.
+
+Field-tested on "как вести твиттер сейчас": five assistants disagreed about
+X's ranking weights; the loop opened `xai-org/x-algorithm` and established that
+the weight constants are referenced but never defined in the public code — so
+the exact coefficients circulating in guides are unsupported by the source they
+cite.
+
 ## 0.5.0 — 2026-08-06
 
 YouTube as a real source, three transcription routes, and the first release

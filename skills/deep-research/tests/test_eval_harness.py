@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -284,6 +285,291 @@ class TestNoKeyBaseline(unittest.TestCase):
         # Beast still scored.
         self.assertEqual(row["beast"]["depth"], 3)
         self.assertEqual(row["beast"]["social_coverage"], 3)
+
+
+PARALLEL_KEY = "prl_faketestkey_123456"
+
+
+def _parallel_env(secrets_dir, **extra):
+    """No host key may satisfy these tests, and no other route may leak in."""
+    env = {
+        "DEEP_RESEARCH_SECRETS_DIR": str(secrets_dir),
+        "BRAVE_API_KEY": "",
+        "PARALLEL_API_KEY": "",
+    }
+    env.update(extra)
+    return env
+
+
+class TestYouTubeCoverage(unittest.TestCase):
+    """The youtube connector reads spoken content a web index cannot, so the
+    coverage axis must credit it — and must agree with the provenance table,
+    which already files youtube under 'partial'."""
+
+    def test_youtube_counts_as_a_native_platform(self):
+        for token in ("youtube", "youtube.com",
+                      "https://www.youtube.com/watch?v=vD0E3EUb8-8",
+                      "https://youtu.be/vD0E3EUb8-8"):
+            with self.subTest(token=token):
+                self.assertEqual(
+                    eval_harness.score_social_coverage([token]), 1, token
+                )
+
+    def test_youtube_is_distinct_from_the_other_platforms(self):
+        self.assertEqual(
+            eval_harness.score_social_coverage(
+                ["youtube", "reddit", "x.com", "t.me"]
+            ),
+            4,
+        )
+
+    def test_a_platforms_own_docs_are_not_that_platforms_conversation(self):
+        """Caught while scoring a real opponent: help.x.com counted as
+        "reached X natively". A help centre is a corporate publication a web
+        index has in full — crediting it would score reading the manual as
+        reading the room. (This lowers an opponent's number, which is why the
+        reasoning has to stand on its own.)"""
+        for host in ("https://help.x.com/en/using-x/x-timeline",
+                     "https://developer.x.com/en/docs",
+                     "https://blog.x.com/en_us/topics",
+                     "https://support.reddit.com/hc/en-us"):
+            with self.subTest(host=host):
+                self.assertEqual(eval_harness.score_social_coverage([host]), 0, host)
+
+    def test_the_real_platform_hosts_still_count(self):
+        self.assertEqual(
+            eval_harness.score_social_coverage(
+                ["https://x.com/a/status/1", "https://old.reddit.com/r/x/comments/2"]
+            ),
+            2,
+        )
+
+    def test_fully_indexed_forums_still_earn_nothing(self):
+        self.assertEqual(
+            eval_harness.score_social_coverage(
+                ["https://news.ycombinator.com/item?id=1", "https://example.com"]
+            ),
+            0,
+        )
+
+
+class TestParallelIsNeverImplicit(unittest.TestCase):
+    """A configured key is not consent to spend it. The eval must stay free
+    unless the caller explicitly asks for the paid opponent."""
+
+    def test_configured_key_alone_never_triggers_a_paid_call(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("paid Parallel call attempted without --baseline")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            secrets = Path(tmp) / "secrets"
+            secrets.mkdir()
+            (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+            env = _parallel_env(secrets)
+            with unittest.mock.patch.dict(os.environ, env), \
+                    unittest.mock.patch.object(eval_harness, "_post_json", boom), \
+                    unittest.mock.patch.object(eval_harness, "_get_json", boom), \
+                    unittest.mock.patch("urllib.request.urlopen", boom):
+                row = eval_harness.run_eval("mem0 problems", run)
+
+        self.assertEqual(row["baseline_kind"], "web-index")
+        self.assertEqual(row["baseline"], "unavailable - no web-index key configured")
+
+    def test_cli_default_stays_free_and_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            secrets = Path(tmp) / "secrets"
+            secrets.mkdir()
+            (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)), \
+                    contextlib.redirect_stdout(stdout):
+                rc = eval_harness.main(["q", "--beast-dir", str(run)])
+        self.assertEqual(rc, 0)
+        self.assertIn("was NOT used", stdout.getvalue())
+
+
+class TestParallelBaseline(unittest.TestCase):
+    def _run(self, tmp, result, post=None, **kwargs):
+        secrets = Path(tmp) / "secrets"
+        secrets.mkdir(exist_ok=True)
+        (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+        posted = []
+
+        def fake_post(url, payload, headers=None, timeout=60):
+            posted.append((url, payload, dict(headers or {})))
+            return {"run_id": "run_abc"}
+
+        with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+            scores = eval_harness.run_parallel_baseline(
+                "how to run twitter now",
+                post=post or fake_post,
+                fetch=lambda url, headers=None, timeout=20: result,
+                sleep=lambda _s: None,
+                **kwargs,
+            )
+        return scores, posted
+
+    def test_key_travels_in_the_header_never_the_url(self):
+        result = {"output": {"content": 'x\n- https://x.com/a/status/1\n  "said it"'}}
+        with tempfile.TemporaryDirectory() as tmp:
+            _, posted = self._run(tmp, result)
+        url, payload, headers = posted[0]
+        self.assertEqual(url, "https://api.parallel.ai/v1/tasks/runs")
+        self.assertEqual(headers["x-api-key"], PARALLEL_KEY)
+        self.assertNotIn(PARALLEL_KEY, url)
+        self.assertEqual(payload["processor"], "ultra")
+        self.assertEqual(payload["input"], "how to run twitter now")
+
+    def test_text_output_is_scored_on_the_same_axes_as_beast(self):
+        content = (
+            "Report\n"
+            '- https://x.com/alice/status/1\n  "engagement fell off a cliff"\n'
+            '- https://reddit.com/r/Twitter/comments/2\n  "same here"\n'
+            "- https://example.com/blog\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, {"output": {"content": content}})
+        # two quoted threads; the unquoted blog link is a pointer, not evidence
+        self.assertEqual(scores["depth"], 2)
+        self.assertEqual(scores["social_coverage"], 2)
+
+    def test_structured_citations_still_count_as_evidence(self):
+        """An `auto`-shaped answer keeps its links in a sibling field; scoring
+        only the prose would report it as evidence-free."""
+        result = {
+            "output": {
+                "content": {"answer": "things changed"},
+                "basis": [{
+                    "citations": [
+                        {"url": "https://x.com/bob/status/9",
+                         "excerpt": "my reach fell off a cliff in March"},
+                        {"url": "https://reddit.com/r/Twitter/comments/2",
+                         "excerpt": "same here, impressions down 80 percent"},
+                        # Fully web-indexed: a real citation, but it earns no
+                        # coverage credit for either side.
+                        {"url": "https://news.ycombinator.com/item?id=1",
+                         "excerpt": "the ranking model changed again"},
+                    ]
+                }],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 3)
+        self.assertEqual(scores["social_coverage"], 2)
+
+    def test_the_live_excerpts_field_is_not_dropped(self):
+        """Regression, caught in a real duel: the API sends `excerpts` (a
+        list). Reading only a singular `excerpt` silently threw away every
+        quote the opponent supplied and scored it at zero depth — which would
+        have published a rigged benchmark."""
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{
+                    "citations": [
+                        {"url": "https://help.x.com/en/using-x/x-timeline",
+                         "excerpts": ["For you serves posts from accounts and "
+                                      "Topics you follow as well as recommended posts."]},
+                        {"url": "https://help.x.com/en/rules-and-policies/x-limits",
+                         "excerpts": ["Posts: 50 original posts and 200 replies per day.",
+                                      "Direct Messages daily limit is 500 messages sent."]},
+                    ]
+                }],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 2)
+
+    def test_a_citation_with_no_excerpt_is_a_pointer_not_evidence(self):
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{"citations": [
+                    {"url": "https://help.x.com/en/using-x/x-timeline", "excerpts": []},
+                ]}],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 0)
+
+    def test_missing_key_is_honest_and_makes_no_call(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("called without a key")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty"
+            empty.mkdir()
+            with unittest.mock.patch.dict(os.environ, _parallel_env(empty)):
+                scores = eval_harness.run_parallel_baseline(
+                    "q", post=boom, fetch=boom, sleep=boom
+                )
+        self.assertIsInstance(scores, str)
+        self.assertIn("no parallel key", scores)
+
+    def test_a_failed_start_degrades_without_leaking_the_key(self):
+        def failing_post(*args, **kwargs):
+            raise urllib.error.HTTPError("u", 401, "Unauthorized", None, None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, {}, post=failing_post)
+        self.assertIsInstance(scores, str)
+        self.assertIn("could not start", scores)
+        self.assertNotIn(PARALLEL_KEY, scores)
+
+    def test_a_run_that_never_finishes_says_so_instead_of_scoring_zero(self):
+        def never_ready(url, headers=None, timeout=20):
+            raise urllib.error.HTTPError(url, 404, "not ready", None, None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "secrets"
+            secrets.mkdir()
+            (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+            clock = iter([0.0, 0.0, 10_000.0, 10_000.0])
+            with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+                scores = eval_harness.run_parallel_baseline(
+                    "q",
+                    post=lambda *a, **k: {"run_id": "r"},
+                    fetch=never_ready,
+                    sleep=lambda _s: None,
+                    now=lambda: next(clock),
+                )
+        self.assertIsInstance(scores, str)
+        self.assertIn("did not finish", scores)
+
+    def test_empty_result_is_not_reported_as_a_zero_score(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, {"output": {"content": "   "}})
+        self.assertIsInstance(scores, str)
+        self.assertIn("empty result", scores)
+
+    def test_price_is_stated_before_the_call(self):
+        note = eval_harness.parallel_price_note("ultra")
+        self.assertIn("$0.3", note)
+        self.assertIn("ultra", note)
+
+    def test_sub_cent_prices_are_not_rounded_up(self):
+        """At two decimals a $0.005 run prints as "$0.01" — a small lie about
+        money is still a lie about money."""
+        note = eval_harness.parallel_price_note("lite")
+        self.assertIn("$0.005", note)
+
+    def test_unknown_processor_says_unknown_rather_than_guessing(self):
+        self.assertIn("price unknown", eval_harness.parallel_price_note("zzz"))
+
+    def test_table_names_the_opponent_that_actually_ran(self):
+        row = {
+            "question": "q", "baseline_kind": "parallel",
+            "beast": {"depth": 5, "freshness_hours": 2.0, "social_coverage": 4},
+            "baseline": {"depth": 3, "freshness_hours": None, "social_coverage": 1},
+        }
+        table = eval_harness.format_table(row)
+        self.assertIn("Beast vs parallel baseline", table)
+        self.assertNotIn("web-index", table)
 
 
 class TestEvalLog(unittest.TestCase):

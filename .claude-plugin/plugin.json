@@ -1,7 +1,7 @@
 {
   "name": "deep-research",
-  "version": "0.5.0",
-  "description": "Plan-first project-local deep research — Gemini/Grok/Perplexity lenses + free direct connectors (Hacker News, hiring-signal, Polymarket, GitHub, Reddit, Bluesky, YouTube with transcript fallback) + Claude synthesis. Does not bill Anthropic/OpenAI APIs by default.",
+  "version": "0.6.0",
+  "description": "Plan-first project-local deep research \u2014 Gemini/Grok/Perplexity lenses + free direct connectors (Hacker News, hiring-signal, Polymarket, GitHub, Reddit, Bluesky, YouTube with transcript fallback) + Claude synthesis. Does not bill Anthropic/OpenAI APIs by default.",
   "author": {
     "name": "ZBS",
     "url": "https://github.com/zbs-gg"
