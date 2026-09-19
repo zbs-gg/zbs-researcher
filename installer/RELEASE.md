@@ -5,7 +5,14 @@
 Version bump authorized on 2026-09-05; GitHub and npm publication explicitly
 authorized on 2026-09-19. At release start npm reports 0.5.0 and origin/main
 carries plugin 0.6.0. npm authentication is missing; shim publication is pending
-the owner's login. GitHub authentication is available.
+the owner's login.
+
+GitHub publication verified on 2026-09-19: PR #18 merged into main at
+a2c81efa77e76616512281b1b66ad9d9fc5e087d; annotated tag v0.7.0 points to that
+commit and the public release is live:
+https://github.com/zbs-gg/zbs-researcher/releases/tag/v0.7.0.
+The remote plugin manifest reports 0.7.0. Registry latest still reports 0.5.0;
+do not describe npm 0.7.0 as published until upload and registry verification.
 
 Before publishing, integrate with current main through a release PR, preserve
 0.6.0 history, include the prepared runtime/reference files and rerun the full
