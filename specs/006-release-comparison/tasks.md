@@ -24,5 +24,5 @@ Dependencies: T001 → T002 → T003; T004 → T005; both stories → T006 → T
 ## Authorized publication — 2026-09-19
 
 - [x] T008 Integrate the prepared release with origin/main; refresh distribution labels and rerun release qualification with a final scoped adversarial diff review.
-- [ ] T009 Land via PR, tag/release 0.7.0 on GitHub and verify the public plugin metadata.
-- [ ] T010 Publish npm shim 0.7.0 after authentication, inspect its exact package contents and verify the registry version. Record a blocker if owner login is unavailable.
+- [x] T009 Land via PR, tag/release 0.7.0 on GitHub and verify the public plugin metadata.
+- [ ] T010 Publish npm shim 0.7.0 after authentication, inspect its exact package contents and verify the registry version. Blocked: npm ENEEDAUTH; owner login required. Registry latest remains 0.5.0.

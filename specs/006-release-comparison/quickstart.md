@@ -22,3 +22,9 @@ Run focused test_release_docs.py, full unittest suite, then scripts/selftest.sh 
 - Final scoped adversarial review checked the integrated diff, source/reference inclusion, project-only storage and symlink/overwrite guards, output escaping and provenance limits, preserved 0.6.0 history, comparison hashes/date/no-winner caveats, and distribution labels. No release-blocking issue found. Staged files contain no private research directory, local settings, logs or detected credential patterns. Fixed four Markdown trailing-whitespace findings before qualification.
 - GitHub authentication is available. npm reports ENEEDAUTH; browser login was offered without opening or controlling the owner's desktop. npm 0.7.0 is not yet published. Public README distinguishes the existing npm 0.5.0 shim from the GitHub plugin.
 - A new matched benchmark remains deferred; this release does not establish superiority over manual research or another product.
+
+## Distribution receipts — 2026-09-19
+
+- PR #18 merged at 05:03:02 UTC; main commit a2c81efa77e76616512281b1b66ad9d9fc5e087d has the same qualified tree as release commit 0083ee3.
+- Annotated remote tag v0.7.0 resolves to that main commit. Public GitHub release (not a draft) published at 05:03:29 UTC: https://github.com/zbs-gg/zbs-researcher/releases/tag/v0.7.0.
+- GitHub contents API independently returned plugin version 0.7.0. npm registry still returned latest 0.5.0. npm publication is blocked on owner authentication, not on package qualification. No npm upload succeeded or is claimed.
