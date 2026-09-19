@@ -44,6 +44,7 @@ STATE_ENV_VARS = (
     "OPENROUTER_API_KEY",
     "GROQ_API_KEY",
     "THREADS_ACCESS_TOKEN",
+    "MONID_API_KEY",
     "DEEP_RESEARCH_PROFILE",
     "DEEP_RESEARCH_CARTOGRAPHER_URL",
     # Steers which transcription route the state reports.
@@ -84,6 +85,7 @@ class DetectStateTests(unittest.TestCase):
                     "scrapecreators": False,
                     "groq": False,
                     "threads": False,
+                    "monid": False,
                 },
                 "telegram_session": False,
                 "cartographer": False,
@@ -118,12 +120,14 @@ class DetectStateTests(unittest.TestCase):
             GEMINI_API_KEY="AIzaFakeForTest123",
             OPENROUTER_API_KEY="sk-or-fake-test-123",
             GROQ_API_KEY="gsk_faketest123",
+            MONID_API_KEY="monid_test_fake123",
         ):
             state = detect_state.collect_state()
 
         self.assertTrue(state["providers"]["gemini"])
         self.assertTrue(state["providers"]["openrouter"])
         self.assertTrue(state["providers"]["groq"])
+        self.assertTrue(state["providers"]["monid"])
         self.assertFalse(state["providers"]["grok"])
         self.assertFalse(state["providers"]["perplexity"])
         self.assertFalse(state["providers"]["scrapecreators"])
@@ -132,6 +136,7 @@ class DetectStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             secrets = Path(tmp).resolve()
             (secrets / "gemini-key.txt").write_text("AIzaFakeFromFile42\n", encoding="utf-8")
+            (secrets / "monid-key.txt").write_text("monid_test_file42\n", encoding="utf-8")
             (secrets / "collector.session").write_text("", encoding="utf-8")
             (secrets / "onboarding.json").write_text(
                 json.dumps({"wizard_done": True, "tier": "0"}), encoding="utf-8"
@@ -141,6 +146,7 @@ class DetectStateTests(unittest.TestCase):
                 state = detect_state.collect_state()
 
         self.assertTrue(state["providers"]["gemini"])
+        self.assertTrue(state["providers"]["monid"])
         self.assertTrue(state["telegram_session"])
         self.assertTrue(state["wizard_done"])
         self.assertEqual(state["tier"], "0")
@@ -293,6 +299,19 @@ class DetectStateTests(unittest.TestCase):
         combined = result.stdout + result.stderr
         self.assertNotIn(env_secret, combined)
         self.assertNotIn(file_secret, combined)
+
+    def test_monid_secret_never_appears_in_state_or_doctor(self):
+        secret = "monid_test_ThisMustNeverPrint987"
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp).resolve()
+            (secrets / "monid-key.txt").write_text(secret + "\n", encoding="utf-8")
+            with isolated_environment(secrets):
+                state = detect_state.collect_state()
+                report = detect_state.doctor_report()
+
+        self.assertTrue(state["providers"]["monid"])
+        self.assertNotIn(secret, json.dumps(state))
+        self.assertNotIn(secret, report)
 
     def test_non_utf8_key_file_degrades_to_absent_state_no_crash(self):
         # The SessionStart hook must never crash the session. A non-UTF-8

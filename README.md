@@ -9,19 +9,79 @@
 
 # ZBS Researcher
 
-**ZBS Researcher — deep, multi-source research with native, full-breadth
-social/community depth and auditable primary evidence.**
-It reads the platforms from inside — live X via Grok's `x_search`, Telegram
-communities through a real client session, the full Reddit archive via
-Arctic-Shift, Threads, TikTok/IG, Bluesky — plus HN, GitHub, Polymarket and
-a dozen more channels pulled in parallel, a research plan written before
-every run, and a shareable HTML brief at the end. Every load-bearing claim
-ships as a real quote + author handle + clickable live link, where a
-web-index researcher sees only the indexed scraps. "Free/cheaper" is
-not the pitch — quality is: minutes to the first report, $0 and zero keys
-to start, but that is a property, not the argument.
+**0.7.0** [Changes](CHANGELOG.md) ·
+[Actual side-by-side comparison](docs/comparison/README.md) ·
+[Where research files live](#output-ownership)
 
-## One-command install
+**ZBS Researcher turns a research goal into a human playbook and an auditable
+agent context.** The host agent clarifies the decision, connects only the needed
+services, searches Russian and English sources, reads social discussions and
+video transcripts, follows leads and contradictions, then synthesizes actions.
+"Free/cheaper" is not the pitch — quality is: source depth, auditable primary evidence, traceable claims,
+and useful next steps. Access gaps remain explicit; superiority over manual
+research or another product has not been established.
+
+## Give it a decision; get reusable research
+
+Ask the skill in your agent session, for example:
+
+> Research Reddit and X audience growth for a creator. Help me choose the first
+> measurable experiment. Read Russian and English posts, threads, comments and
+> these YouTube links. My API budget is $1. Give me a playbook and agent context.
+
+The skill reuses supplied information, asks only about consequential missing
+scope, checks configured services offline, and requests missing connections
+securely. The default final pair is **`playbook.html` + `agent-context.json`**,
+generated from one validated evidence dossier. The HTML is an offline field
+manual: actions, measurement, stop conditions, sources and visible limitations.
+The JSON contains the same IDs, claims, evidence, coverage and open questions.
+
+New explicit source routes: `reddit-web` (Perplexity discovery), `reddit-thread`
+(free targeted archive post/comments), `reddit-live` (paid ScrapeCreators,
+explicit only), and `youtube-social` (captions plus bounded comments, **no paid
+transcription fallback**). Grok retains returned tool traces; native X access
+requires a direct xAI key. Discovery/model summaries never automatically count
+as directly read posts. Russian coverage means Russian source text.
+
+Existing installed plugins may still load older instructions until updated.
+Use the packaged
+[`SKILL.md`](skills/deep-research/SKILL.md) and its
+[goal-driven workflow](skills/deep-research/references/goal-driven.md).
+The Python runner alone does **not** execute the reasoning loop: the host agent
+reads, follows leads and writes the dossier. Legacy quick-scan/entity modes and
+their `synthesis.md` / `brief.html` outputs remain supported.
+
+Offline helper commands: `research_session.py prepare`, `status`, `example`,
+`reserve`, `settle`, `finalize`, `index`. Reservations retain unknown costs but are not
+provider-side caps. Current prices and bounded requests are still required.
+Research commands do not install software globally or publish research.
+
+## Local use in Codex
+
+The same goal-driven skill can be loaded in Codex; Claude Code is not required
+for this route. Copy the **whole** `skills/deep-research` directory (including
+`scripts/` and `references/`) to `~/.agents/skills/deep-research`. If that target
+already exists, inspect it before replacing anything. Start a fresh Codex turn
+and invoke it explicitly:
+
+> $deep-research Help me choose my first measurable audience-growth experiment.
+> Read Russian and English sources. External API budget: $0. Return a playbook
+> and agent context, with missing evidence clearly marked.
+
+Use your existing Codex sign-in. Host account usage/limits and external research
+provider charges are separate; installing this skill creates no new account or
+subscription. Codex reads the skill directly, without the Claude marketplace
+installer or SessionStart hook. Goal-driven `prepare` still checks relevant
+source configuration offline. This is a local skill installation, not a
+published Codex plugin; see the [qualification record](specs/004-goal-driven-research/quickstart.md).
+
+## One-command install — Claude Code, published channel
+
+The installer is a thin shim, not a pinned copy of the research engine: it
+fetches the plugin from the GitHub marketplace. npm installer 0.5.0 remains
+the registry's latest version as checked on 2026-09-19; publishing shim 0.7.0
+is pending npm authentication. The existing shim uses the same marketplace
+commands below. For Codex, use the local skill route above, not this installer.
 
 ```bash
 npx -y @zbs-gg/zbs-researcher@latest
@@ -38,60 +98,67 @@ claude plugin install deep-research@zbs-researcher
 npx one-liner, or skip node entirely — the two native commands above need
 only the `claude` CLI.
 
-## Demo
+## Side by side: what changed in the answer?
 
-*(coming soon: live-board GIF from a terminal + screenshot of the wizard's
-first question)*
+One real question, answered on **2026-08-14**: when should a production agent use
+Mem0, Letta, or custom memory, and what failures are practitioners reporting?
+This is a historical illustration, **not a test of 0.7.0**. No winner was declared.
 
-<!--
-CAPTURE (board GIF): record in a REAL terminal — a live TTY at >= 80
-columns — NOT from inside an agent session. The animated connector board
-intentionally does not render in the agent path: when stderr is not a TTY
-it degrades to plain per-channel lines by design. Run directly:
+| What to inspect | ZBS Researcher — saved investigate run | Parallel Ultra — saved answer |
+| --- | --- | --- |
+| Starting recommendation | Choose who owns durable state; distinguish a memory service from an agent runtime | Also separates the control boundary; proposes a hybrid with an authoritative custom store |
+| Practitioner failures | Discusses specific scope/isolation issues, hosted-vs-open-source reproducibility and missing-write reports | Discusses stale/conflicting retrieval, specialized-agent memory requests and context-engineering failures |
+| Action derived from evidence | Test write/read scopes and graph boundaries; verify persistence; evaluate the exact deployment tier | Test corrections, contradictions, async completion and abstention; split recall from authoritative state |
+| What this answer adds | Issue-specific failure analysis with explicit operational checks | A broader architecture matrix, evaluation literature and a detailed hybrid design |
+| What it does not establish | Reddit collection failed; Letta incident sample is thinner; no matched deployment test | Incident prevalence and best product are not established by the cited documentation/issues |
+| Inspect the actual text | [Preserved ZBS answer](docs/comparison/researcher.md) | [Preserved Parallel answer](docs/comparison/parallel.md) |
 
-    python3 skills/deep-research/scripts/deep-research.py "<topic>" \
-        --only hackernews,github,reddit --max-items 5
+These cells describe the **saved answers**, not independently reverified claims
+about today's Mem0 or Letta. [Read the case, exact question and limitations](docs/comparison/README.md).
 
-Record with asciinema + agg, or terminal screen-capture -> GIF. Save as
-docs/assets/board.gif and uncomment:
+## Your manual research workflow vs ZBS
 
-![Live connector board — direct terminal run](docs/assets/board.gif)
--->
+This compares responsibilities in the described workflow, not capability ceilings
+of Grok, Gemini, Perplexity, ChatGPT or Parallel. A skilled human can perform the
+same checks and may produce a better result.
 
-<!--
-CAPTURE (persona screenshot): open Claude Code in a fresh project with the
-plugin installed and say "run deep research". Screenshot the FIRST
-wizard question — the one where ZBS Researcher introduces itself by name
-with the Auto / Manual / Skip options. Save as
-docs/assets/persona-hello.png and uncomment:
+| Work | Manual multi-service workflow | ZBS goal-driven workflow |
+| --- | --- | --- |
+| Frame the decision | Prepare a prompt and adapt it for each service | Host agent reuses the brief and asks about a missing decision |
+| Read different sources | Open chosen services, collect outputs and follow original links yourself | Host agent routes source-specific queries, reads available originals and follows leads |
+| Reconcile answers | Compare claims, dates and disagreements yourself | Host agent synthesizes evidence IDs, caveats, contradictions and remaining gaps |
+| Preserve the work | Export and organize files yourself | Prepare/finalize maintain project-local raw/, processed/, paired finals and a run index |
+| Hand off to another agent | Supply reports and explain their context | Point it to research/INDEX.md and the relevant agent-context.json |
+| Verify quality | Depends on the researcher's judgment and access | Still depends on agent judgment and access; structural validation does not establish truth |
 
-![ZBS Researcher introduces itself in Claude Code](docs/assets/persona-hello.png)
--->
+For 0.7.0, file organization/export has deterministic and installed-copy checks.
+A fresh matched comparison of the current workflow with manual research,
+ordinary host web search or other deep-research products remains **not run**.
 
 ## Tiers at a glance
 
 - **Tier 0 — free, no keys**: HN, hiring-signal, Polymarket, YouTube *(needs `yt-dlp`)*,
-  GitHub, github-issues, Reddit, Bluesky, launch-radar, revenue-radar.
+  GitHub, github-issues, Reddit, launch-radar, revenue-radar. Bluesky remains
+  available by explicit selection.
 - **Tier 1 — your own keys**: LLM lenses Gemini / Grok / Perplexity.
 - **Tier 2 — one OpenRouter key**: all three default LLM lenses at once.
-- **Opt-in**: Telegram · TikTok/IG · Threads · Meta Ads.
+- **Opt-in**: direct X via Monid · Bluesky · Telegram · TikTok/IG · Threads · Meta Ads.
 
 The full channel table is in [Connectors](#connectors) below.
 
-**What goes where — transparent:** connectors send only your query text to
-public endpoints and nothing else; the full per-connector breakdown is in
+**What goes where:** search routes send queries and selected URLs; enabled
+cloud transcription also sends audio. Credentials go to the selected provider.
+The full per-connector breakdown is in
 [CONFIGURATION.md](CONFIGURATION.md#security--transparency--what-it-does-what-it-sends-where).
 
 ## What it is (plugin id: `deep-research`)
 
-A Claude Code plugin for **plan-first, multi-channel deep research**. It
-triangulates a topic across reasoning-model lenses **and** raw platform
-signal, then synthesizes the contradictions — not just the top-ranked
-summary.
-
-Unlike a single web search, it pulls in parallel from up to **18 connectors**
-and, crucially, **produces a research plan before it runs** and **does not
-bill Anthropic or OpenAI APIs by default**.
+A research skill usable in Claude Code and through local Codex installation.
+The host agent investigates and synthesizes; Python helpers collect source
+records, validate evidence and produce the deliverables. The registry currently
+has **23 connectors**. The default goal-driven workflow selects only relevant
+routes, writes a research plan first and **does not bill Anthropic or OpenAI
+APIs by default**. Host account usage and other provider charges are separate.
 
 ## Why this one
 
@@ -99,19 +166,19 @@ bill Anthropic or OpenAI APIs by default**.
   subreddits, repos, whether it's a forecastable event or a hiring-market
   question), writes a short `research-plan.md` into the project-local run,
   and only then executes. No cold keyword blasts or detached plan files.
-- **No Anthropic/OpenAI spend by default.** Retrieval runs on Gemini (Google),
+- **No Anthropic/OpenAI API spend by default.** Retrieval can use Gemini (Google),
   Grok (xAI), and Perplexity plus free direct connectors. Synthesis happens in
-  your Claude Code session. The OpenAI channel is opt-in.
-- **Structural signal, not just prose.** Direct connectors return numbers an
-  LLM won't: HN points, Polymarket odds, GitHub stars/velocity, and a
+  your host agent session. The OpenAI API channel is opt-in.
+- **Source metrics.** Direct connectors retain HN points, Polymarket odds,
+  GitHub stars/velocity, and a
   **hiring-signal** (how many "Who is hiring?" postings mention your topic —
   a cheap read on whether a skill/trend is heating up).
-- **It reads what was said, not what was tagged.** The YouTube channel opens
-  videos and takes the caption track — and when the captions are missing or
-  too poor to quote, it transcribes the audio itself (locally at $0 on Apple
-  silicon, or via Groq/OpenRouter). A web index only ever sees the title and
-  description, so that transcript is evidence no index holds.
-- **Shareable HTML brief.** Renders a self-contained dark-mode `brief.html`.
+- **Video evidence.** `youtube-social` retains available transcripts and a bounded
+  comment sample. Missing captions remain a gap; separately selected `youtube`
+  can use configured local or approved cloud transcription. Transcripts can
+  add evidence absent from a particular search result; exclusivity is not assumed.
+- **Human and agent output.** The default pair is `playbook.html` and
+  `agent-context.json`. Legacy quick scans retain optional `brief.html`.
 
 ## Connectors
 
@@ -127,8 +194,13 @@ bill Anthropic or OpenAI APIs by default**.
 | github | direct | free | repo stars, velocity |
 | github-issues | direct | free | top issues by reactions + comment excerpts |
 | reddit | direct | free* | top posts via Arctic-Shift archive — real score+comments *(best-effort)* |
-| bluesky | direct | free* | top posts *(best-effort)* |
-| youtube | direct | free *(needs `yt-dlp`)* | what was **said** in videos — human captions when they exist, our own transcription when they don't |
+| reddit-web | LLM | Perplexity or OpenRouter *(explicit)* | Reddit URL discovery; model reports, not direct comments |
+| reddit-thread | direct | free *(explicit)* | known post and bounded archive comments; gaps possible |
+| reddit-live | direct | ScrapeCreators *(explicit, paid)* | one known-post/comments request; no automatic fallback |
+| x | direct | Monid *(opt-in, pay-per-use)* | public X posts with author, date, engagement, and canonical link |
+| bluesky | direct | free* *(opt-in)* | top posts *(best-effort)* |
+| youtube | direct | `yt-dlp`; transcription route dependent | captions or configured local/approved cloud transcription |
+| youtube-social | direct | free *(needs `yt-dlp`, explicit)* | available transcripts and bounded comments; no paid audio fallback |
 | launch-radar | direct | free (PH slice: free token) | what's shipping — Show HN + yc-oss + DevHunt momentum + category velocity |
 | revenue-radar | direct | free | what's selling — Flippa sold prices + Substack bestseller tiers |
 | meta-ads | direct | free Meta token | who's paying to advertise — Meta Ad Library (EU scope) |
@@ -136,16 +208,20 @@ bill Anthropic or OpenAI APIs by default**.
 | tiktok-ig | direct | *(opt-in)* pay-per-use vendor key | TikTok/IG posts + comments — every run costs vendor credits |
 | threads | direct | *(key-gated)* free official token or pay-per-use vendor | Threads posts by keyword — official keeps Meta's TOP order, vendor adds engagement counts |
 
-Free direct channels are zero-config; one OpenRouter key (Tier 2) can drive
-all three default LLM lenses at once — and now transcription too. LLM channels activate when their key is
-present. See [CONFIGURATION.md](CONFIGURATION.md).
+Free default direct channels are zero-config; one OpenRouter key (Tier 2) can drive
+all three LLM lenses, plus separately selected transcription. Keys establish
+configuration, not spending permission; the goal-driven host reserves approved
+spend before each paid request. The `x` connector is separate: it needs `MONID_API_KEY`, discovers
+and inspects the current route for free, shows its unit price, and only runs
+when explicitly selected with `--fire x` or `--only x`. See
+[CONFIGURATION.md](CONFIGURATION.md).
 
 A full **"what it sends where"** breakdown — per-connector endpoints, what
 data leaves the machine, and which credential (if any) each channel uses —
 is in [CONFIGURATION.md](CONFIGURATION.md#security--transparency--what-it-does-what-it-sends-where).
-The short version: connectors send your research query text to their public
-endpoints and nothing else; no Anthropic calls ever, no OpenAI calls unless
-you opt in.
+Search sends queries/URLs; enabled cloud transcription sends audio. The runner
+does not call Anthropic, and its OpenAI connector requires explicit selection.
+This says nothing about the host session's separate account usage.
 
 ## Install
 
@@ -163,11 +239,15 @@ invokes it automatically when a task needs multi-source diligence).
 
 ## Quickstart
 
-The skill is the complete workflow: it allocates one run under the launching
-project's `research/` directory, writes the plan first, gathers channel
-evidence there, and adds the session-authored synthesis and optional HTML
-brief as siblings. Its connector call uses `--prepared-run`, so a lost or
-stale run path cannot overwrite a completed bundle or mix topics.
+The default skill workflow calls `research_session.py prepare` once in the
+launching project, gathers captures in raw/, writes analysis and dossier in
+processed/, then finalizes the HTML/JSON pair and local index. See the
+[goal-driven contract](skills/deep-research/references/goal-driven.md).
+
+The commands below are explicit lower-level/legacy tools. Only the legacy
+plan-first handoff uses `--prepared-run`; do not apply that allocator to a new
+goal-driven run. Direct CLI commands do not enforce the session spending ledger;
+check selected routes and approved costs before executing any paid example.
 
 The commands below expose the lower-level **raw-evidence runner**. A direct
 topic run writes connector output and `manifest.json`; it does not author a
@@ -231,6 +311,10 @@ the loop itself — compose → fire → read → drill → synthesize, bounded 
 python3 "$SCRIPT" "owner/repo memory leak" --fire github-issues \
     --output-dir ./scratch/investigate-run
 
+# direct public X posts; explicit pay-per-use Monid call
+python3 "$SCRIPT" "proposal automation complaints" --fire x \
+    --output-dir ./scratch/investigate-run
+
 # coverage-receipts: what a web-index researcher would structurally miss,
 # rendered ONLY from the manifest's real provenance records — never inferred
 python3 "$SCRIPT" --coverage ./scratch/investigate-run
@@ -240,12 +324,79 @@ python3 "$SCRIPT" --feedback "grok was gold, reddit stale" --topic "agent memory
 ```
 
 Repeated fires into the same `--output-dir` accumulate one `manifest.json`
-with a provenance record per fire — the coverage-receipts source. The
-feedback note is saved locally to inform the next run on the topic (relayed
-to a Cartographer install only when you connect one — it is never described
-as "learned"). The full playbook (compose table, drill bounds, paid-lens
-budget) lives in the skill's INVESTIGATE MODE section; the knobs and the
-eval harness are in [CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
+with a provenance record and call receipt per fire — including the provider
+route, timing, real vendor usage when returned, and an explicit actual,
+estimated, or unavailable cost state. HTTP response bodies obey the connector's
+total wall-clock deadline; a timeout leaves an atomic private error receipt
+instead of an indefinitely open paid call. One run directory accepts only one
+active fire at a time; the cross-process lock prevents a slow paid call from
+being overwritten by a second operator. The manifest is replaced atomically
+with owner-only permissions. The feedback note is saved locally to
+inform the next run on the topic (relayed to a Cartographer install only when
+you connect one — it is never described as "learned"). The full playbook
+(compose table, drill bounds, paid-lens budget) lives in the skill's
+INVESTIGATE MODE section; the knobs and the eval harness are in
+[CONFIGURATION.md](CONFIGURATION.md#investigate-mode).
+
+Before it searches, investigate decomposes the person's broad question into
+the decision, the then/now delta, the hidden entities, and the changes that
+could overturn the answer. Before synthesis, every load-bearing claim gets the
+date of the fact — not merely the page date — and one proof tier: T1 primary,
+T2 first-hand numbers, T3 informed opinion, or T4 unsupported. T4 may be cited
+only to challenge a claim. Evidence older than 12 months without current T1/T2
+confirmation moves to an explicit stale/historical section instead of driving
+the recommendation; unresolved questions stay visible.
+
+The local eval harness can also compare a stored run with Parallel's paid deep
+research, but only by explicit choice:
+
+```bash
+python3 "$SKILL_DIR/scripts/eval_harness.py" "<same question>" \
+    --beast-dir RUN_DIR --baseline parallel --processor ultra \
+    --artifact-dir PRIVATE_ARTIFACT_DIR
+```
+
+A configured key never triggers this baseline by itself. Both sides are scored
+on quoted-source depth, known freshness, and native social coverage; unavailable
+or undated evidence stays unavailable or unknown rather than becoming a fake
+zero. See [Configuration](CONFIGURATION.md#paid-baseline-parallel-deep-research-opt-in)
+for the provider, cost, and data boundary.
+
+With `--artifact-dir`, the duel keeps the complete provider JSON, readable
+answer, normalized citation receipts showing what entered each score, run ID,
+state, timing, processor, and the published price basis. Files are replaced
+atomically with private permissions, and all recorded paths inside the bundle
+are relative. Omit the flag to retain the original lightweight eval behavior.
+
+### First official Researcher vs Parallel benchmark
+
+The benchmark controller freezes the five-question English suite before any
+answer exists, snapshots a completed investigate run, gates one Parallel Ultra
+attempt, creates blind A/B material, and derives a result only after both the AI
+audit and owner scores are complete:
+
+```bash
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" init \
+    --confirm-price-checked
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" snapshot-researcher \
+    --bundle research/duel-v1-... --question q01 --run-dir RUN_DIR
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" run-parallel \
+    --bundle research/duel-v1-... --question q01
+```
+
+The last command is a no-network cost/readiness preview. A paid attempt requires
+a separate `--confirm-paid` after its Researcher answer is frozen; a stored key,
+suite approval, price check, or previous question never grants reusable consent.
+Only a recorded technical failure permits `--retry-technical`, and every attempt
+is preserved. Runtime bundles stay in ignored `research/` with private atomic
+files; questions, rubric, code, and synthetic tests are the only committed data.
+Before a Researcher snapshot is accepted, every paid `manifest.calls[]` receipt
+must carry an actual or estimated USD amount, or an unavailable state reconciled
+to a conservative USD cost entry by `call_id`; all such amounts count toward the
+USD 10 cap. Each AI audit uses a claim ledger with citation-fit, fact date,
+freshness, support status, and evidence note rather than three unchecked
+completion flags. The first result is internal and the tool never publishes or
+merges it.
 
 `--only a,b` / `--skip x,y` scope the channels; `--q name:query` aims a single
 channel; `--max-items N` sets items per direct channel. `--allocate-run`
@@ -260,7 +411,44 @@ paths to the directory captured before an agent visits the skill/plugin tree.
 
 ## Output ownership
 
-A complete skill-authored bundle stays together:
+Full goal-driven research stays inside the project that launched it. The helper
+creates folders and updates the local index automatically:
+
+```text
+<project>/research/
+├── INDEX.md                     # entry point for people and future agents
+├── index.json                   # local runs, dates, status and result links
+└── deep-research-{slug}-{date}[-NN]/
+    ├── raw/                     # retained source captures and receipts
+    ├── processed/               # agent notes, analysis and extractions
+    │   └── dossier.json
+    ├── playbook.html            # final human report
+    ├── agent-context.json       # final agent data with evidence paths
+    ├── artifacts.json           # file roles, sizes and content hashes
+    ├── research-layout.json
+    ├── research-brief.json
+    ├── research-plan.md
+    ├── source-readiness.json
+    └── spending.json
+```
+
+Another agent starts with `research/INDEX.md`, selects a goal/date, and reads
+`agent-context.json`. Evidence paths are relative to that run. It can consult
+processed notes and raw captures without reconstructing the chat. Partial
+coverage, inference and historical dates remain explicit. No global catalog,
+server, extra account or subscription is involved. Installing the skill alone
+does not start research; preparation/export happen when invoked.
+
+`raw/` can include connector-normalized capture records, not guaranteed original
+HTTP bytes or direct verification. Agent paraphrases/conclusions go in processed/.
+Sources are untrusted data, never instructions. `prepare` indexes a draft;
+`finalize` validates, writes the paired report/inventory and refreshes the index.
+Offline `research_session.py index --project-root PROJECT` rebuilds it and flags
+missing/inconsistent results. User-owned index files are not silently replaced.
+Old goal-driven runs keep their flat dossier; no automatic migration.
+
+Explicit legacy quick-scan/entity workflows retain their older
+complete skill-authored bundle:
 
 ```text
 <project>/research/deep-research-{slug}-{date}[-NN]/

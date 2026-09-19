@@ -67,7 +67,7 @@ def _r(name):
 # carries its repo facet (U0 spike: a bare per-entity github query mostly
 # duplicates the enumeration and, for short names like "Zep", collides with
 # zephyr / zeppelin). github-issues gives distinct per-entity user voice.
-FREE_ENTITY_CHANNELS = ("hackernews", "github-issues", "reddit", "bluesky")
+FREE_ENTITY_CHANNELS = ("hackernews", "github-issues", "reddit")
 # Paid LLM lenses fan out on the top-K entities only (hybrid), budget-gated.
 PAID_LENSES = ("grok", "gemini", "perplexity")
 

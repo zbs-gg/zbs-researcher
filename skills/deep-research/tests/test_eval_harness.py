@@ -375,6 +375,8 @@ class TestParallelIsNeverImplicit(unittest.TestCase):
 
         self.assertEqual(row["baseline_kind"], "web-index")
         self.assertEqual(row["baseline"], "unavailable - no web-index key configured")
+        self.assertIsNone(row["baseline_processor"])
+        self.assertIsNone(row["baseline_cost"]["amount"])
 
     def test_cli_default_stays_free_and_says_so(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -401,12 +403,14 @@ class TestParallelBaseline(unittest.TestCase):
             posted.append((url, payload, dict(headers or {})))
             return {"run_id": "run_abc"}
 
+        announce = kwargs.pop("announce", lambda _message: None)
         with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
             scores = eval_harness.run_parallel_baseline(
                 "how to run twitter now",
                 post=post or fake_post,
                 fetch=lambda url, headers=None, timeout=20: result,
                 sleep=lambda _s: None,
+                announce=announce,
                 **kwargs,
             )
         return scores, posted
@@ -484,6 +488,27 @@ class TestParallelBaseline(unittest.TestCase):
             scores, _ = self._run(tmp, result)
         self.assertEqual(scores["depth"], 2)
 
+    def test_duplicate_excerpt_shapes_do_not_inflate_depth(self):
+        result = {
+            "output": {
+                "content": "answer",
+                "basis": [{"citations": [
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpt": "the same first-hand report",
+                        "excerpts": ["the same first-hand report"],
+                    },
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpts": ["a second excerpt from the same thread"],
+                    },
+                ]}],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            scores, _ = self._run(tmp, result)
+        self.assertEqual(scores["depth"], 1)
+
     def test_a_citation_with_no_excerpt_is_a_pointer_not_evidence(self):
         result = {
             "output": {
@@ -506,7 +531,8 @@ class TestParallelBaseline(unittest.TestCase):
             empty.mkdir()
             with unittest.mock.patch.dict(os.environ, _parallel_env(empty)):
                 scores = eval_harness.run_parallel_baseline(
-                    "q", post=boom, fetch=boom, sleep=boom
+                    "q", post=boom, fetch=boom, sleep=boom,
+                    announce=lambda _message: None,
                 )
         self.assertIsInstance(scores, str)
         self.assertIn("no parallel key", scores)
@@ -537,6 +563,7 @@ class TestParallelBaseline(unittest.TestCase):
                     fetch=never_ready,
                     sleep=lambda _s: None,
                     now=lambda: next(clock),
+                    announce=lambda _message: None,
                 )
         self.assertIsInstance(scores, str)
         self.assertIn("did not finish", scores)
@@ -547,10 +574,36 @@ class TestParallelBaseline(unittest.TestCase):
         self.assertIsInstance(scores, str)
         self.assertIn("empty result", scores)
 
-    def test_price_is_stated_before_the_call(self):
-        note = eval_harness.parallel_price_note("ultra")
-        self.assertIn("$0.3", note)
-        self.assertIn("ultra", note)
+    def test_price_is_stated_immediately_before_the_call(self):
+        events = []
+
+        def announce(note):
+            self.assertIn("$0.3", note)
+            self.assertIn("ultra", note)
+            events.append("price")
+
+        def post(*args, **kwargs):
+            events.append("post")
+            return {"run_id": "r"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._run(
+                tmp,
+                {"output": {"content": "answer"}},
+                post=post,
+                announce=announce,
+            )
+        self.assertEqual(events, ["price", "post"])
+
+    def test_direct_call_rejects_unpriced_processor_without_network(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("paid call attempted for an unpriced processor")
+
+        result = eval_harness.run_parallel_baseline(
+            "q", processor="ultra8x", post=boom, fetch=boom, sleep=boom,
+            announce=boom,
+        )
+        self.assertIn("not an allowed priced", result)
 
     def test_sub_cent_prices_are_not_rounded_up(self):
         """At two decimals a $0.005 run prints as "$0.01" — a small lie about
@@ -561,15 +614,199 @@ class TestParallelBaseline(unittest.TestCase):
     def test_unknown_processor_says_unknown_rather_than_guessing(self):
         self.assertIn("price unknown", eval_harness.parallel_price_note("zzz"))
 
+    def test_cli_rejects_unpriced_processor_before_any_paid_call(self):
+        def boom(*args, **kwargs):
+            raise AssertionError("paid call attempted for an unpriced processor")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            with unittest.mock.patch.object(eval_harness, "_post_json", boom), \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                eval_harness.main([
+                    "q", "--beast-dir", str(run),
+                    "--baseline", "parallel", "--processor", "ultra8x",
+                ])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_table_names_the_opponent_that_actually_ran(self):
         row = {
             "question": "q", "baseline_kind": "parallel",
+            "baseline_cost": {
+                "currency": "USD", "amount": 0.3,
+                "basis": "published list price per successful run",
+            },
             "beast": {"depth": 5, "freshness_hours": 2.0, "social_coverage": 4},
             "baseline": {"depth": 3, "freshness_hours": None, "social_coverage": 1},
         }
         table = eval_harness.format_table(row)
         self.assertIn("Beast vs parallel baseline", table)
         self.assertNotIn("web-index", table)
+        self.assertIn("parallel list price: $0.3", table)
+
+    def test_parallel_row_records_processor_and_list_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            scores = {"depth": 1, "freshness_hours": None, "social_coverage": 1}
+            with unittest.mock.patch.object(
+                eval_harness, "run_parallel_baseline", return_value=scores
+            ):
+                row = eval_harness.run_eval(
+                    "q", run, baseline="parallel", processor="pro"
+                )
+        self.assertEqual(row["baseline_processor"], "pro")
+        self.assertEqual(row["baseline_cost"]["amount"], 0.10)
+        self.assertEqual(
+            row["baseline_cost"]["basis"],
+            "published list price per successful run",
+        )
+
+
+class TestParallelArtifactBundle(unittest.TestCase):
+    def _run_with_artifacts(self, tmp, result):
+        run = _beast_dir(tmp)
+        secrets = Path(tmp) / "secrets"
+        secrets.mkdir(exist_ok=True)
+        (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+        artifacts = Path(tmp) / "artifacts"
+        wall_times = iter([
+            datetime(2026, 8, 14, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 14, 8, 0, 12, tzinfo=timezone.utc),
+        ])
+        mono_times = iter([100.0, 112.25])
+        with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+            row = eval_harness.run_eval(
+                "same frozen question",
+                run,
+                baseline="parallel",
+                processor="ultra",
+                artifact_dir=artifacts,
+                post=lambda *a, **k: {"run_id": "run_audit_123"},
+                fetch=lambda *a, **k: result,
+                sleep=lambda _s: None,
+                now=lambda: next(mono_times),
+                utc_now=lambda: next(wall_times),
+                announce=lambda _message: None,
+            )
+        return row, artifacts
+
+    def test_raw_answer_evidence_and_outcome_are_private_and_auditable(self):
+        result = {
+            "status": "completed",
+            "output": {
+                "content": "A readable answer.",
+                "basis": [{"citations": [
+                    {
+                        "url": "https://x.com/a/status/1",
+                        "excerpts": ["first-hand account with enough detail"],
+                    },
+                    {
+                        "url": "https://www.x.com/a/status/1/",
+                        "excerpt": "duplicate spelling of the same source",
+                    },
+                    {
+                        "url": "https://help.x.com/en/using-x",
+                        "excerpts": [],
+                    },
+                ]}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            row, artifacts = self._run_with_artifacts(tmp, result)
+
+            expected = {
+                "parallel-raw.json",
+                "parallel-answer.md",
+                "parallel-evidence.json",
+                "parallel-outcome.json",
+            }
+            self.assertEqual({p.name for p in artifacts.iterdir()}, expected)
+            if os.name == "posix":
+                for path in artifacts.iterdir():
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600, path)
+
+            raw = json.loads((artifacts / "parallel-raw.json").read_text())
+            self.assertEqual(raw, result)
+            answer = (artifacts / "parallel-answer.md").read_text()
+            self.assertIn("A readable answer", answer)
+            self.assertIn("https://x.com/a/status/1", answer)
+
+            evidence = json.loads(
+                (artifacts / "parallel-evidence.json").read_text()
+            )["evidence"]
+            self.assertEqual(len(evidence), 3)
+            self.assertTrue(evidence[0]["counted_depth"])
+            self.assertEqual(evidence[0]["native_social_platforms"], ["x"])
+            self.assertFalse(evidence[1]["counted_depth"])
+            self.assertEqual(evidence[1]["exclusion_reason"], "duplicate_url")
+            self.assertFalse(evidence[2]["counted_depth"])
+            self.assertEqual(evidence[2]["exclusion_reason"], "no_usable_excerpt")
+
+            outcome = json.loads(
+                (artifacts / "parallel-outcome.json").read_text()
+            )
+            self.assertEqual(outcome["run_id"], "run_audit_123")
+            self.assertEqual(outcome["state"], "completed")
+            self.assertEqual(outcome["started_at"], "2026-08-14T08:00:00+00:00")
+            self.assertEqual(outcome["finished_at"], "2026-08-14T08:00:12+00:00")
+            self.assertEqual(outcome["duration_seconds"], 12.25)
+            self.assertEqual(outcome["processor"], "ultra")
+            self.assertEqual(outcome["cost"]["amount"], 0.3)
+            self.assertIn("docs.parallel.ai", outcome["cost"]["source"])
+            self.assertEqual(
+                set(outcome["artifacts"].values()),
+                expected - {"parallel-outcome.json"},
+            )
+            self.assertTrue(all(not Path(p).is_absolute()
+                                for p in outcome["artifacts"].values()))
+            self.assertEqual(row["baseline_artifacts"]["outcome"],
+                             "parallel-outcome.json")
+            serialized = json.dumps(row) + json.dumps(outcome)
+            self.assertNotIn(PARALLEL_KEY, serialized)
+            self.assertNotIn(str(Path(tmp)), serialized)
+
+    def test_failed_parallel_attempt_still_persists_timing_and_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            secrets = Path(tmp) / "secrets"
+            secrets.mkdir()
+            (secrets / "parallel-key.txt").write_text(PARALLEL_KEY, encoding="utf-8")
+            artifacts = Path(tmp) / "failed"
+            wall_times = iter([
+                datetime(2026, 8, 14, 9, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 14, 9, 0, 1, tzinfo=timezone.utc),
+            ])
+            mono_times = iter([5.0, 6.0])
+
+            def fail(*_args, **_kwargs):
+                raise urllib.error.HTTPError("secret-url", 500, "boom", None, None)
+
+            with unittest.mock.patch.dict(os.environ, _parallel_env(secrets)):
+                row = eval_harness.run_eval(
+                    "q", run, baseline="parallel", artifact_dir=artifacts,
+                    post=fail, fetch=fail, sleep=lambda _s: None,
+                    now=lambda: next(mono_times),
+                    utc_now=lambda: next(wall_times),
+                    announce=lambda _message: None,
+                )
+            outcome = json.loads((artifacts / "parallel-outcome.json").read_text())
+            self.assertEqual(outcome["state"], "unavailable")
+            self.assertIn("could not start", outcome["reason"])
+            self.assertEqual(outcome["duration_seconds"], 1.0)
+            self.assertIsNone(outcome["run_id"])
+            self.assertIsInstance(row["baseline"], str)
+            self.assertNotIn("secret-url", json.dumps(outcome))
+
+    def test_artifact_flag_is_rejected_for_the_free_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = _beast_dir(tmp)
+            with contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                eval_harness.main([
+                    "q", "--beast-dir", str(run),
+                    "--artifact-dir", str(Path(tmp) / "artifacts"),
+                ])
+        self.assertEqual(raised.exception.code, 2)
 
 
 class TestEvalLog(unittest.TestCase):

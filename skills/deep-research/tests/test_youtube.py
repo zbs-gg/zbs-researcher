@@ -180,6 +180,80 @@ class YouTubeCase(unittest.TestCase):
             return count, out.read_text(encoding="utf-8"), transcriber
 
 
+class CommentEvidenceTests(YouTubeCase):
+    def run_comments(self, meta):
+        fake = FakeYtDlp(meta=meta, subs={'en': json3([GOOD_TEXT])})
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'youtube.md'
+            with mock.patch.object(youtube_mod, '_run_yt_dlp', fake), \
+                    mock.patch.object(youtube_mod, '_yt_dlp_argv', return_value=['yt-dlp']), \
+                    mock.patch.object(youtube_mod, 'transcribe_route', return_value=(None, 'disabled')):
+                count = youtube_mod.channel_youtube('https://youtu.be/' + VIDEO_ID, out, 1, comments=True)
+            data = json.loads(out.with_suffix('.evidence.json').read_text())
+            return count, data, fake.calls
+
+    def test_comments_have_parent_author_text_and_are_bounded(self):
+        meta = {'title': 'Video', 'duration': 472, 'subtitles': {'en': []},
+                'comments': [{'id': 'c' + str(n), 'text': 'Опыт человека', 'author': 'reader', 'parent': 'root', 'timestamp': None} for n in range(45)]}
+        count, data, calls = self.run_comments(meta)
+        self.assertEqual(count, 1)
+        comments = [row for row in data['evidence'] if row['kind'] == 'comment']
+        self.assertEqual(len(comments), 30)
+        self.assertEqual(comments[0]['parent_id'], 'root')
+        self.assertIsNone(comments[0]['published_at'])
+        self.assertIn('lc=c0', comments[0]['url'])
+        self.assertIn('--write-comments', calls[0])
+        self.assertIn('youtube:comment_sort=top;max_comments=30,15,15,3,2', calls[0])
+        self.assertEqual(data['videos'][0]['comments_status'], 'partial')
+
+    def test_missing_comments_does_not_discard_caption(self):
+        count, data, _ = self.run_comments({'duration': 472, 'subtitles': {'en': []}})
+        self.assertEqual(count, 1)
+        self.assertEqual(data['videos'][0]['comments_status'], 'unavailable')
+        self.assertEqual(data['videos'][0]['transcript_status'], 'read')
+        self.assertTrue(any(row['kind'] == 'transcript' for row in data['evidence']))
+
+    def test_default_caption_languages_include_russian_and_english(self):
+        self.assertIn('ru', youtube_mod.DEFAULT_SUB_LANGS)
+        self.assertIn('en', youtube_mod.DEFAULT_SUB_LANGS)
+
+    def test_failed_multilingual_download_retries_only_known_original_without_comments(self):
+        calls = []
+        meta = {'duration': 472, 'automatic_captions': {'en-orig': [], 'ru': []},
+                'comments': [{'id': 'c1', 'text': 'A comment'}]}
+        def fake(args, timeout):
+            calls.append(args)
+            if len(calls) == 1:
+                return 1, json.dumps(meta), 'Translated subtitle unavailable'
+            output = Path(args[args.index('-o') + 1]).parent
+            (output / (VIDEO_ID + '.en-orig.json3')).write_text(json.dumps(json3([GOOD_TEXT])))
+            return 0, json.dumps(meta), ''
+        video = {'id': VIDEO_ID, 'url': 'https://youtu.be/' + VIDEO_ID, '_comments_requested': True}
+        with mock.patch.object(youtube_mod, '_run_yt_dlp', fake):
+            youtube_mod._read_video(video, may_transcribe=False)
+        self.assertEqual(video['transcript'], GOOD_TEXT)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn('--write-comments', calls[1])
+        self.assertEqual(calls[1][calls[1].index('--sub-langs') + 1], 'en-orig')
+        self.assertEqual(len(video['comments']), 1)
+
+    def test_disabled_audio_note_is_not_spent_budget(self):
+        fake = FakeYtDlp(meta={'duration': 472})
+        video = {'id': VIDEO_ID, 'url': 'https://youtu.be/' + VIDEO_ID,
+                 '_transcription_disabled_reason': 'transcription disabled; no approved audio processing'}
+        with mock.patch.object(youtube_mod, '_run_yt_dlp', fake):
+            youtube_mod._read_video(video, may_transcribe=False)
+        self.assertIn('disabled', video['note'])
+        self.assertNotIn('budget spent', video['note'])
+
+    def test_comment_dates_are_explicitly_approximate(self):
+        _, data, _ = self.run_comments({'duration': 472, 'comments': [
+            {'id': 'c1', 'text': 'Comment', 'timestamp': 1700000000}]})
+        comment = next(e for e in data['evidence'] if e['kind'] == 'comment')
+        self.assertEqual(comment['date_precision'], 'approximate')
+        self.assertIn('relative', ' '.join(comment['limitations']))
+
+
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
