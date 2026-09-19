@@ -158,6 +158,10 @@ class DuelTestCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.bundle = self.root / "bundle"
+        # The suite's 24-hour window is deliberately frozen. Keep the test
+        # clock in that window so the suite does not expire with wall time.
+        self.clock = unittest.mock.patch.object(duel, "_utc_now", return_value=_utc())
+        self.clock.start()
         self.providers = {
             "parallel": True,
             "gemini": True,
@@ -169,6 +173,7 @@ class DuelTestCase(unittest.TestCase):
         }
 
     def tearDown(self):
+        self.clock.stop()
         self.temp.cleanup()
 
     def init(self, now=None):

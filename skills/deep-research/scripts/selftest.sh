@@ -28,9 +28,22 @@ files = {
     "cli": root / "skills/deep-research/scripts/deep-research.py",
 }
 texts = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+active_skill = texts['skill']
+goal_workflow = (root / 'skills/deep-research/references/goal-driven.md').read_text(encoding='utf-8')
+legacy_workflow = (root / 'skills/deep-research/references/legacy-workflow.md').read_text(encoding='utf-8')
+# Preserve the legacy contract without loading its competing intake by default.
+texts['skill'] += '\n' + legacy_workflow
 
 forbidden = ("~/research", "~/elle", "/Users/nikshilov", "$HOME/research", "${HOME}/research")
 problems = []
+for marker in ('references/goal-driven.md', 'playbook.html', 'agent-context.json'):
+    if marker not in active_skill:
+        problems.append('active skill is missing goal-driven entry marker: ' + marker)
+if len(active_skill.splitlines()) > 500:
+    problems.append('active skill must route optional legacy details instead of loading them all')
+for marker in ('research_session.py', 'prepare', 'finalize', 'model_reported', 'seed', 'reserve'):
+    if marker not in goal_workflow:
+        problems.append('goal workflow is missing: ' + marker)
 for name, text in texts.items():
     for value in forbidden:
         if value in text:
@@ -232,7 +245,7 @@ for ref in hook_refs:
         )
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
-expected = "0.5.0"
+expected = "0.7.0"
 if plugin["version"] != expected or listed["version"] != expected:
     raise SystemExit(
         f"version mismatch: plugin={plugin['version']} marketplace={listed['version']} expected={expected}"

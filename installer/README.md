@@ -2,6 +2,11 @@
 
 One-command installer for the **ZBS Researcher** (`deep-research`) Claude Code plugin.
 
+Package version: **0.7.0**. `@latest` selects the registry release, not a local
+working copy. The shim installs the marketplace
+plugin and does not pin its version or install a Codex skill. For local Codex
+use, see the [repository guide](https://github.com/zbs-gg/zbs-researcher#local-use-in-codex).
+
 ```
 npx -y @zbs-gg/zbs-researcher@latest
 ```
@@ -61,7 +66,8 @@ have it.
 
 ## About the plugin
 
-ZBS Researcher is a plan-first, project-local, multi-channel deep-research
-runner for Claude Code — LLM lenses + free direct connectors + Claude
-synthesis, with no Anthropic/OpenAI API spend by default.
+ZBS Researcher turns a research decision into an HTML playbook and agent JSON,
+with retained source captures and processed analysis inside the user's project.
+The host agent investigates social/video/web sources and writes the conclusions;
+the Python helper validates and exports them. No Anthropic/OpenAI API spend by default.
 Source: https://github.com/zbs-gg/zbs-researcher

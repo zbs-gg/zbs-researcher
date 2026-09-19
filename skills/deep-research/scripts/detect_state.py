@@ -7,7 +7,7 @@ whether the onboarding wizard already ran, and what the MACHINE can do:
 
     {"providers": {"gemini": false, "grok": false, "perplexity": false,
                    "openrouter": false, "scrapecreators": false,
-                   "groq": false, "threads": false},
+                   "groq": false, "threads": false, "monid": false},
      "telegram_session": false, "cartographer": false, "profile": "client",
      "wizard_done": false, "tier": null, "persona": null,
      "hardware": {"os": "darwin", "arch": "arm64", "apple_silicon": true,
@@ -48,7 +48,10 @@ RUNNER_PATH = SCRIPTS_DIR / "deep-research.py"
 
 # Providers surfaced to the agent. Every name here is a key in the runner's
 # KEYS dict, so bool(KEYS[name]) is the authoritative configured/absent signal.
-PROVIDERS = ("gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq", "threads")
+PROVIDERS = (
+    "gemini", "grok", "perplexity", "openrouter", "scrapecreators", "groq",
+    "threads", "monid",
+)
 ONBOARDING_MARKER = "onboarding.json"
 CARTOGRAPHER_ENV_VAR = "DEEP_RESEARCH_CARTOGRAPHER_URL"
 

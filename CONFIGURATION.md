@@ -4,14 +4,87 @@ The plugin works with **zero configuration** for the free direct connectors.
 The LLM channels each need one API key (or one OpenRouter key for all three
 default lenses — Tier 2).
 
+For the local Codex skill installation, keep the existing Codex account and
+authentication store. No Claude account is needed. A ChatGPT-authenticated host
+session uses its account allowance; research connector API charges are separate.
+The Claude SessionStart hook is not installed in Codex: the goal-driven helper's
+offline readiness check supplies the needed configuration state instead.
+When isolating a CLI test with `--ignore-user-config`, preserve the existing
+`cli_auth_credentials_store` choice explicitly (for example `keyring` if that
+is the user's configured store). Otherwise the test may fail to find an existing
+sign-in. Never copy credentials or silently fall back to API-key billing.
+
+## Goal-driven intake and social reading (0.7.0)
+
+The full-research skill starts with the user's decision, languages, links and
+approved spending ceiling. `research_session.py prepare --brief brief.json`
+checks **configuration only**, without making provider calls. A configured key
+does not prove live connectivity or authorize spending. Ask for only missing
+relevant services using the host's secure credential input; never paste secrets
+into chat, tracked files or command logs.
+
+| Explicit route | Needs | What it actually reads |
+|---|---|---|
+| `reddit-web` | Perplexity key or OpenRouter | Citation-bearing discovery report; model-reported, then verify post URLs |
+| `reddit-thread` | Public Reddit post URL | Free Arctic Shift post + up to `--max-items` comments (max 100), archive limits explicit |
+| `reddit-live` | ScrapeCreators key + explicit paid approval | One known-post/comments request; no automatic pagination/retry; credits are not USD |
+| `youtube-social` | yt-dlp | RU/EN captions and bounded comments; never paid audio fallback |
+| `grok` | Direct xAI key for native X | Search and targeted thread/reply requests; returned tool/citation trace saved |
+
+All four new source names are default-off in the legacy blanket CLI, selected
+deliberately by the full-research skill. A known YouTube URL can be supplied as
+the topic. `youtube-social` keeps transcript and comment availability separate;
+the sample is capped at 30 comments total / 15 parents / 15 replies / 3 replies
+per thread / depth 2. Captions default to `ru-orig,ru,en-orig,en`. Ordinary
+`youtube` retains its existing configurable transcription behavior.
+If a translated track fails before the original downloads, one free original-
+language caption recovery is allowed; comments are not fetched again. Comment
+dates derived from YouTube's relative labels are explicitly approximate.
+Known Reddit comment seeds are distinguished from parent posts; the archive
+may make one additional free exact-comment lookup, while the paid route never
+auto-paginates. Short YouTube seed URLs match their canonical video identity.
+
+For direct `--fire grok`, `--grok-max-turns` and `--grok-max-output-tokens`
+bound the provider request. They do not cap aggregate tool-run USD or guarantee
+an exact number of searches. Other modes and non-native fallback routes reject
+these options instead of silently discarding them.
+
+Each acquisition query uses a unique `RUN_DIR/raw/<call-id>` folder. Received
+reports, normalized capture records and response receipts remain separate from
+agent notes, translations and conclusions in `RUN_DIR/processed/`. Raw placement
+does not prove direct access or original HTTP bytes. Write the dossier at the
+path returned by prepare, normally `RUN_DIR/processed/dossier.json`; old flat
+runs retain `RUN_DIR/dossier.json`. Finalization validates the final pair,
+writes artifacts.json with roles/sizes/hashes and refreshes the project index.
+An interrupted export can leave mismatched digests; rerun finalize to repair it.
+
+`research/INDEX.md` is the later agent's entry; `index.json` is its machine-readable
+counterpart. Both list only direct goal-driven runs inside the selected project.
+`research_session.py index --project-root PROJECT` rebuilds them offline, checks
+exports and inventoried files, and marks broken/stale results incomplete. It
+does not move old data, scan other projects or change root AGENTS.md. Symlinked
+roots/runs/artifacts are refused or excluded. User-owned index conflicts fail
+closed. Inspect the prior writer before removing a stale research/.index.lock.
+If prepare/finalize committed files but could not refresh the index, it returns
+their paths with `index_error` and `project_index: null`. Keep the existing run
+and rebuild the index after resolving the error; do not repeat allocation.
+
+`reserve` refuses accounting over the saved budget; `settle` records actual
+USD only when returned. Unknown costs keep their reservation. This is not an
+API-side hard cap and is not wired into arbitrary direct CLI calls: the host
+must enforce it before every paid request. On timeout, no automatic retry.
+Inspect a stale `.session.lock` process before removing its lock file.
+
+See [the full workflow and dossier schema](skills/deep-research/references/goal-driven.md).
+
 ## Free out of the box (no keys)
 
 `hackernews`, `hiring`, `polymarket`, `github`, `github-issues`, `reddit`,
-`bluesky`, `launch-radar`, `revenue-radar` — these call public endpoints.
+`launch-radar`, `revenue-radar` — these call public endpoints.
 `github`/`github-issues` use your `gh` CLI auth if present (higher rate
-limit), otherwise the unauthenticated API. `reddit` and `bluesky` are
-best-effort (some networks throttle them; they degrade to an `ERROR.md`
-without affecting other channels).
+limit), otherwise the unauthenticated API. `reddit` is best-effort. Bluesky is
+still free and selectable, but is off by default because it repeatedly added
+little signal for this workflow.
 
 ## LLM channels — provide a key to activate
 
@@ -38,10 +111,26 @@ export OPENAI_API_KEY=sk-...
 A channel with no key is simply skipped and recorded in `manifest.json`
 under `connectors_skipped` — the run continues with whatever is available.
 
+### SuperGrok subscription is not the standard API-key route
+
+xAI supports using a SuperGrok or X Premium subscription in named agent
+clients through its OAuth integration, including OpenCode. Researcher does
+not implement that interactive OAuth flow: its `grok` connector calls the xAI
+Responses API with `GROK_API_KEY`, whose team credits and balance are managed
+separately. An xAI 402/403 therefore stops that connector; it never silently
+spends through OpenRouter or Monid. To use the supported subscription route,
+run Researcher from a compatible OAuth client. To retrieve raw public X posts
+instead, explicitly select the separate Monid connector below.
+
+Sources: [xAI OpenCode OAuth announcement](https://x.ai/news/grok-opencode),
+[xAI API FAQ](https://docs.x.ai/grok/faq), and
+[xAI Management API](https://docs.x.ai/developers/rest-api-reference/management).
+
 ## Gated / opt-in connectors
 
 | Connector | Env var(s) | Notes |
 |---|---|---|
+| x | `MONID_API_KEY` | off by default; explicit pay-per-use public X retrieval through Monid. `discover` and `inspect` are free; the runner prints the compatible route and quoted unit price before `run`. No fallback from `grok`. |
 | meta-ads | `META_ADS_TOKEN` | free Meta Ad Library token; auto-skipped without it |
 | launch-radar (PH slice) | `PRODUCTHUNT_TOKEN` | optional free read token; the other three sources need nothing |
 | telegram | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` | off by default; needs a Telethon `*.session` in the secrets dir; see the security section below |
@@ -104,7 +193,8 @@ directory defaults to `~/.config/zbs-researcher/secrets` and is overridable:
 export DEEP_RESEARCH_SECRETS_DIR=~/.config/deep-research/secrets
 ```
 
-File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
+File names checked: `gemini-key.txt`, `grok-api-key.txt`, `monid-key.txt`
+(or `monid-api-key.txt`), `openai-api-key.txt`
 (or `openai-key.txt` / `openai.txt`), `perplexity-key.txt`,
 `openrouter-key.txt` (LLM lenses **and** transcription), `groq-key.txt`,
 `meta-ads-token.txt`,
@@ -136,7 +226,7 @@ across every channel. Flags (single mode ignores them):
 | `--paid-all` | off | run paid lenses on **all** N entities (raises the budget) |
 | `--dry-run` | off | enumerate + write `research-plan.md` with the call budget, then stop (no fan-out, no paid calls) |
 
-Free channels (hackernews, github-issues, reddit, bluesky) run with **zero
+Free channels (hackernews, github-issues, reddit) run with **zero
 keys** on all N entities; the paid lenses (grok/gemini/perplexity, or one
 OpenRouter key) enrich the top-K. Cost/time is reported honestly in
 `manifest.json` (real token usage where the vendor returns it, else a labeled
@@ -163,6 +253,13 @@ earlier the moment a round surfaces no new leads — and the paid lenses
 the breadth, paid fires are saved for the leads that matter. A `--fire` on
 a keyless paid source refuses up front, naming the missing keys — no
 surprise paid calls.
+
+`--fire x` is also paid, but by Monid rather than by an LLM token provider.
+It is never included in a default run or entity fan-out. The connector first
+uses Monid's free discovery and inspection endpoints, prints the selected
+provider endpoint and quoted unit price, and only then sends the paid `run`.
+The receipt says `actual` only when Monid returns actual billing; otherwise it
+keeps the catalog amount explicitly labeled `quoted`.
 
 Each paid fire has one connector-specific total HTTP wall-clock deadline (60 to
 600 seconds for the current paid routes), not a renewable per-chunk wait. A timeout writes
@@ -284,8 +381,9 @@ scores, applies the three-
 point per-question margin and critical-error veto, and requires three question
 wins overall. Objective depth/freshness/social coverage, time, and cost stay
 outside the five quality scores. Runtime paths are relative inside mode-0600
-files under the mode-0700 ignored bundle. No command publishes, uploads, merges,
-or consults monid.
+files under the mode-0700 ignored bundle. No duel command publishes, uploads,
+merges, or invokes Monid; the separate `--fire x` connector is outside the duel
+controller and remains explicit-only.
 
 ## Budget note
 
@@ -315,7 +413,8 @@ into research output.
 | github | `api.github.com` (or your authed `gh` CLI) | query text | none (optional `gh` auth = higher rate limit) | on |
 | github-issues | `api.github.com` (or `gh`) | query text | none (optional `gh` auth) | on |
 | reddit | `arctic-shift.photon-reddit.com` | query text + candidate subreddit names | none | on |
-| bluesky | `public.api.bsky.app` | query text | none | on |
+| x | `api.monid.ai`, then the compatible allowlisted provider selected by Monid | query text and `Latest` search parameters | `MONID_API_KEY` / `monid-key.txt`; Monid forwards the request to the displayed underlying provider | **off — opt-in, pay-per-use** |
+| bluesky | `public.api.bsky.app` | query text | none | **off — opt-in, best-effort** |
 | youtube | `youtube.com` / `googlevideo.com` via the local `yt-dlp` tool; audio then goes to whichever transcription route is configured (see above) | query text (as a YouTube search), then caption tracks and — only when captions are unusable — the audio of the top videos | none for search/captions; the transcription route needs its own credential | on, degrades to ERROR.md without `yt-dlp` |
 | launch-radar | `hn.algolia.com`, `yc-oss.github.io`, `api.github.com`; with token also `api.producthunt.com` | query text (the yc-oss pull is a plain list download — no query sent) | none; optional `PRODUCTHUNT_TOKEN` | on |
 | revenue-radar | `api.flippa.com`, `substack.com` | nothing topic-specific — category/list pulls, filtered locally | none | on |

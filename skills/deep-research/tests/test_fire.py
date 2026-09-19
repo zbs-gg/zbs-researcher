@@ -63,6 +63,7 @@ FIRE_OUTPUT_NAMES = {
     "github-issues": "github-issues.md",
     "telegram": "telegram.md",
     "grok": "grok-x.md",
+    "x": "x.md",
     "boom": "boom.md",
     "tiktok-ig": "tiktok-ig.md",
     "slow": "slow.md",
@@ -88,6 +89,20 @@ def make_registry(captured_queries=None):
             usage_sink.append({"prompt_tokens": 7, "completion_tokens": 5})
         return 4
 
+    def direct_x(query, out_path, max_items, usage_sink=None):
+        out_path.write_text("direct X post\n")
+        if usage_sink is not None:
+            usage_sink.append({
+                "provider": "monid",
+                "route_provider": "tikhub",
+                "endpoint": "/api/v1/twitter/web/fetch_search_timeline",
+                "run_id": "run-1",
+                "listed_cost": 0.0015,
+                "listed_cost_basis": "PER_CALL",
+                "cost_status": "quoted",
+            })
+        return 1
+
     def boom(query, out_path, max_items):
         raise RuntimeError("boom failed")
 
@@ -107,6 +122,7 @@ def make_registry(captured_queries=None):
             Connector("github-issues", "direct", gh, "fake gh issues", []),
             Connector("telegram", "direct", tg, "fake telegram", [], default=False),
             Connector("grok", "llm", grok, "fake grok", []),
+            Connector("x", "direct", direct_x, "fake direct X", [], default=False),
             Connector("boom", "direct", boom, "fake failing", []),
             Connector("slow", "llm", slow, "fake slow paid lens", []),
             Connector("tiktok-ig", "direct", never, "fake key-gated",
@@ -394,6 +410,35 @@ class FireManifestAccumulationTests(unittest.TestCase):
             self.assertEqual(call["cost_class"], "paid")
             self.assertEqual(call["cost_receipt"]["status"], "unavailable")
 
+    def test_monid_x_fire_records_quoted_cost_without_calling_it_actual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "run"
+            with patched_runner(make_registry()):
+                stdout, _ = fire(out_dir, "x", "current X evidence")
+            self.assertEqual(parse_envelope(self, stdout)["status"], "ok")
+            call = json.loads((out_dir / "manifest.json").read_text())["calls"][0]
+            channel = json.loads((out_dir / "manifest.json").read_text())["channels"]["x"]
+            self.assertEqual(call["provider"], "monid")
+            self.assertEqual(call["cost_class"], "paid")
+            self.assertEqual(call["cost_receipt"]["status"], "quoted")
+            self.assertEqual(call["cost_receipt"]["amount"], 0.0015)
+            self.assertIn("catalog", call["cost_receipt"]["basis"])
+            self.assertIn("PER_CALL", call["cost_receipt"]["basis"])
+            self.assertNotIn("tokens", channel)
+            self.assertNotIn("tokens_kind", channel)
+
+    def test_monid_x_actual_cost_receipt_wins_over_listed_price(self):
+        conn = deep_research.Connector("x", "direct", _ok_channel, "x", [])
+        record = {"status": "ok", "usage": [{
+            "cost": 0.0012,
+            "cost_status": "actual",
+            "listed_cost": 0.0015,
+        }]}
+        cost_class, receipt = deep_research._fire_cost_receipt("x", conn, record)
+        self.assertEqual(cost_class, "paid")
+        self.assertEqual(receipt["status"], "actual")
+        self.assertEqual(receipt["amount"], 0.0012)
+
     def test_manifest_is_private_and_atomic_temp_is_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "run"
@@ -573,6 +618,20 @@ class ClassicModeCharacterizationTests(unittest.TestCase):
             # The dry run wrote a plan, never a fire manifest.
             self.assertTrue((out_dir / "research-plan.md").exists())
             self.assertFalse((out_dir / "manifest.json").exists())
+
+    def test_bluesky_and_monid_x_are_default_off_but_explicitly_selectable(self):
+        with mock.patch.object(deep_research, "KEYS", {"monid": "configured"}):
+            live, _ = deep_research.select_connectors(None, None)
+            default_names = {connector.name for connector in live}
+            explicit_x, _ = deep_research.select_connectors("x", None)
+            explicit_bluesky, _ = deep_research.select_connectors("bluesky", None)
+
+        self.assertNotIn("x", default_names)
+        self.assertNotIn("bluesky", default_names)
+        self.assertEqual([connector.name for connector in explicit_x], ["x"])
+        self.assertEqual(
+            [connector.name for connector in explicit_bluesky], ["bluesky"]
+        )
 
 
 # ---------------------------------------------------------------------------

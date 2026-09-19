@@ -1,7 +1,43 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-09-19
 
+Prepared 2026-09-05; publication authorized 2026-09-19. The GitHub plugin and npm
+installer are separate distribution channels; see installer/RELEASE.md for status.
+
+### Project-local research storage
+
+- New goal-driven runs separate raw captures and processed analysis; the working
+  dossier lives in processed/dossier.json. Final HTML/JSON stay at run root.
+- Preparation/export maintain research/INDEX.md and index.json inside the
+  launching project only; artifacts.json records file roles, sizes and hashes.
+- Offline index rebuild detects changed dossiers/inventories and broken exports.
+  User index conflicts and symlink escapes fail closed; flat legacy runs remain
+  compatible without migration. No new service or provider charges.
+
+### Goal-driven research and auditable sources
+
+- **Goal-driven bilingual research and two deliverables.** The skill now starts
+  from the decision, supplied links, source languages and approved budget;
+  checks needed services offline; and follows seeds, leads and contradictions.
+  `research_session.py` validates source references, direct-vs-model evidence,
+  coverage, action support and paths, then exports an offline `playbook.html`
+  and matching `agent-context.json`. Partial access stays visibly partial.
+- **Read social evidence, preserve limits.** Explicit `reddit-web`,
+  `reddit-thread`, `reddit-live` and `youtube-social` routes add citation-led
+  discovery, known-post comments and bounded YouTube replies. Social video
+  reading cannot silently bill audio transcription. Grok/Perplexity retain
+  returned source/tool metadata, use current-date prompts, and xAI cost ticks
+  normalize to actual USD. Legacy runner modes stay available. Existing
+  installations need an update to load the new workflow.
+
+- **Explicit public X source through Monid.** `--fire x` and `--only x` now
+  discover and inspect an allowlisted Monid route, announce its quoted unit
+  price before the paid run, preserve actual billing only when returned, and
+  render auditable posts with canonical links. It is default-off and never a
+  hidden fallback for a failed Grok/xAI or OpenRouter call. Bluesky is also
+  default-off but remains explicitly selectable. Configuration docs now
+  distinguish a standard xAI API key from supported SuperGrok OAuth clients.
 - **Auditable investigate calls.** `--fire` now retains provider routing,
   timing, token usage, and actual vendor cost fields when available. Paid HTTP
   reads have a portable total wall-clock deadline; timeouts keep a private
@@ -44,9 +80,45 @@
   vague human questions, marks load-bearing claims T1-T4 using the date of the
   fact, bars T4 from support, and moves claims older than 12 months without
   current T1/T2 confirmation into an explicit stale/historical section.
-- **Spec Kit initialized.** The repository now carries a versioned constitution,
-  living spec/plan/tasks, and Codex workflow skills. This is unreleased work:
-  no package version, npm publication, or marketplace release is included.
+- **Spec Kit initialized.** The repository carries a versioned constitution,
+  living spec/plan/tasks, and Codex workflow skills. Originally implemented
+  before this version bump.
+
+### Installation and comparison
+
+- Local Codex skill installation uses the existing account; the npm shim remains
+  a Claude Code installer. README distinguishes these routes and published state.
+- A dated, same-question ZBS/Parallel comparison includes preserved answer text,
+  source/excerpt hashes, strengths and limitations. It is a historical example,
+  not a fresh 0.7.0 benchmark or a completed blind evaluation.
+
+## 0.6.0 — 2026-08-09
+
+Research that checks whether an answer is true, not just whether it sounds good.
+
+- **Claim grading and a staleness pass** (`SKILL.md` STEP I3.5). Every
+  load-bearing claim now carries the date of the FACT (not the page) and a
+  proof tier T1-T4, where T4 — clickbait, undated, unattributed — may be cited
+  only to be knocked down. A claim older than 12 months without fresh
+  confirmation cannot be load-bearing. Reports gain a mandatory "what people
+  repeat that is no longer true" section.
+- **Vague questions are taken as given** (STEP I-1). The loop decomposes
+  "how do I run a Twitter account now" into then / now / what-changed itself
+  instead of asking for a better-formed query. A tool that needs a clean query
+  is a search box.
+- **Parallel deep research as an opt-in baseline** in the eval harness
+  (`--baseline parallel`). A configured key is never consent to spend it: the
+  default stays the free web-index pass, and the harness says so.
+- Scorer fixes found by running a real duel: the live API's `excerpts` field
+  was being dropped (scoring an opponent's quotes at zero), and a platform's
+  own help centre counted as reaching that platform natively. Both corrected
+  against our own interest.
+
+Field-tested on "как вести твиттер сейчас": five assistants disagreed about
+X's ranking weights; the loop opened `xai-org/x-algorithm` and established that
+the weight constants are referenced but never defined in the public code — so
+the exact coefficients circulating in guides are unsupported by the source they
+cite.
 
 ## 0.5.0 — 2026-08-06
 
