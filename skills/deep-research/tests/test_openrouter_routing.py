@@ -64,6 +64,7 @@ def patched_keys(**overrides):
         "scrapecreators": "",
         "threads": "",
         "brave": "",
+        "monid": "",
     }
     values.update(overrides)
     return mock.patch.dict(deep_research.KEYS, values)
@@ -170,6 +171,27 @@ class OpenRouterRoutingTests(unittest.TestCase):
         self.assertIn("api.x.ai", fake.calls[0]["url"])
         self.assertNotIn("openrouter.ai", fake.calls[0]["url"])
         self.assertIn("direct grok", written)
+
+    def test_grok_spending_limit_never_falls_back_and_points_to_explicit_x(self):
+        err = urllib.error.HTTPError(
+            "https://api.x.ai/v1/responses", 403, "Forbidden", None,
+            io.BytesIO(b'{"error":"monthly spending limit reached"}'),
+        )
+        err._zbs_bounded_body = b'{"error":"monthly spending limit reached"}'
+        fake = FakePost(err)
+        with tempfile.TemporaryDirectory() as tmp, patched_keys(
+            grok="xai-direct", openrouter=OPENROUTER_KEY,
+            monid="monid_test_configured",
+        ), mock.patch.object(deep_research, "post_json", fake), mock.patch.object(
+            deep_research, "_import_sibling",
+            side_effect=AssertionError("no fallback provider may be imported"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, r"--fire x"):
+                deep_research.channel_grok(TOPIC, Path(tmp) / "grok.md", 10)
+
+        self.assertEqual(len(fake.calls), 1)
+        self.assertIn("api.x.ai", fake.calls[0]["url"])
+        self.assertNotIn("openrouter.ai", fake.calls[0]["url"])
 
     # -- perplexity --------------------------------------------------------
     def test_perplexity_openrouter_key_only_uses_sonar_no_tools(self):

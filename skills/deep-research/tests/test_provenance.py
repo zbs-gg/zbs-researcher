@@ -74,6 +74,24 @@ class ReachabilityTableTest(unittest.TestCase):
         tag, _ = provenance.web_index_reachable("grok", None)
         self.assertEqual(tag, "partial")
 
+    def test_direct_x_unknown_age_is_partial(self):
+        tag, reason = provenance.web_index_reachable("x", None)
+        self.assertEqual(tag, "partial")
+        self.assertIn("direct X", reason)
+
+    def test_direct_x_fresh_post_flips_to_no(self):
+        tag, reason = provenance.web_index_reachable("x", 2.5)
+        self.assertEqual(tag, "no")
+        self.assertIn("2.5h", reason)
+
+    def test_direct_x_display_name_names_monid_route(self):
+        record = provenance.provenance_record(
+            "x", "fresh practitioners", 2, newest_item_age_hours=2.5
+        )
+        markers = provenance.coverage_markers([record])
+        self.assertEqual(len(markers), 1)
+        self.assertTrue(markers[0].startswith("X via Monid —"))
+
     def test_reddit_is_partial_regardless_of_freshness(self):
         # Arctic-Shift archive depth vs top-of-Google — not a live pre-index
         # story, so the freshness override does not apply.

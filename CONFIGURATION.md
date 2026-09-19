@@ -4,14 +4,87 @@ The plugin works with **zero configuration** for the free direct connectors.
 The LLM channels each need one API key (or one OpenRouter key for all three
 default lenses — Tier 2).
 
+For the local Codex skill installation, keep the existing Codex account and
+authentication store. No Claude account is needed. A ChatGPT-authenticated host
+session uses its account allowance; research connector API charges are separate.
+The Claude SessionStart hook is not installed in Codex: the goal-driven helper's
+offline readiness check supplies the needed configuration state instead.
+When isolating a CLI test with `--ignore-user-config`, preserve the existing
+`cli_auth_credentials_store` choice explicitly (for example `keyring` if that
+is the user's configured store). Otherwise the test may fail to find an existing
+sign-in. Never copy credentials or silently fall back to API-key billing.
+
+## Goal-driven intake and social reading (0.7.0)
+
+The full-research skill starts with the user's decision, languages, links and
+approved spending ceiling. `research_session.py prepare --brief brief.json`
+checks **configuration only**, without making provider calls. A configured key
+does not prove live connectivity or authorize spending. Ask for only missing
+relevant services using the host's secure credential input; never paste secrets
+into chat, tracked files or command logs.
+
+| Explicit route | Needs | What it actually reads |
+|---|---|---|
+| `reddit-web` | Perplexity key or OpenRouter | Citation-bearing discovery report; model-reported, then verify post URLs |
+| `reddit-thread` | Public Reddit post URL | Free Arctic Shift post + up to `--max-items` comments (max 100), archive limits explicit |
+| `reddit-live` | ScrapeCreators key + explicit paid approval | One known-post/comments request; no automatic pagination/retry; credits are not USD |
+| `youtube-social` | yt-dlp | RU/EN captions and bounded comments; never paid audio fallback |
+| `grok` | Direct xAI key for native X | Search and targeted thread/reply requests; returned tool/citation trace saved |
+
+All four new source names are default-off in the legacy blanket CLI, selected
+deliberately by the full-research skill. A known YouTube URL can be supplied as
+the topic. `youtube-social` keeps transcript and comment availability separate;
+the sample is capped at 30 comments total / 15 parents / 15 replies / 3 replies
+per thread / depth 2. Captions default to `ru-orig,ru,en-orig,en`. Ordinary
+`youtube` retains its existing configurable transcription behavior.
+If a translated track fails before the original downloads, one free original-
+language caption recovery is allowed; comments are not fetched again. Comment
+dates derived from YouTube's relative labels are explicitly approximate.
+Known Reddit comment seeds are distinguished from parent posts; the archive
+may make one additional free exact-comment lookup, while the paid route never
+auto-paginates. Short YouTube seed URLs match their canonical video identity.
+
+For direct `--fire grok`, `--grok-max-turns` and `--grok-max-output-tokens`
+bound the provider request. They do not cap aggregate tool-run USD or guarantee
+an exact number of searches. Other modes and non-native fallback routes reject
+these options instead of silently discarding them.
+
+Each acquisition query uses a unique `RUN_DIR/raw/<call-id>` folder. Received
+reports, normalized capture records and response receipts remain separate from
+agent notes, translations and conclusions in `RUN_DIR/processed/`. Raw placement
+does not prove direct access or original HTTP bytes. Write the dossier at the
+path returned by prepare, normally `RUN_DIR/processed/dossier.json`; old flat
+runs retain `RUN_DIR/dossier.json`. Finalization validates the final pair,
+writes artifacts.json with roles/sizes/hashes and refreshes the project index.
+An interrupted export can leave mismatched digests; rerun finalize to repair it.
+
+`research/INDEX.md` is the later agent's entry; `index.json` is its machine-readable
+counterpart. Both list only direct goal-driven runs inside the selected project.
+`research_session.py index --project-root PROJECT` rebuilds them offline, checks
+exports and inventoried files, and marks broken/stale results incomplete. It
+does not move old data, scan other projects or change root AGENTS.md. Symlinked
+roots/runs/artifacts are refused or excluded. User-owned index conflicts fail
+closed. Inspect the prior writer before removing a stale research/.index.lock.
+If prepare/finalize committed files but could not refresh the index, it returns
+their paths with `index_error` and `project_index: null`. Keep the existing run
+and rebuild the index after resolving the error; do not repeat allocation.
+
+`reserve` refuses accounting over the saved budget; `settle` records actual
+USD only when returned. Unknown costs keep their reservation. This is not an
+API-side hard cap and is not wired into arbitrary direct CLI calls: the host
+must enforce it before every paid request. On timeout, no automatic retry.
+Inspect a stale `.session.lock` process before removing its lock file.
+
+See [the full workflow and dossier schema](skills/deep-research/references/goal-driven.md).
+
 ## Free out of the box (no keys)
 
 `hackernews`, `hiring`, `polymarket`, `github`, `github-issues`, `reddit`,
-`bluesky`, `launch-radar`, `revenue-radar` — these call public endpoints.
+`launch-radar`, `revenue-radar` — these call public endpoints.
 `github`/`github-issues` use your `gh` CLI auth if present (higher rate
-limit), otherwise the unauthenticated API. `reddit` and `bluesky` are
-best-effort (some networks throttle them; they degrade to an `ERROR.md`
-without affecting other channels).
+limit), otherwise the unauthenticated API. `reddit` is best-effort. Bluesky is
+still free and selectable, but is off by default because it repeatedly added
+little signal for this workflow.
 
 ## LLM channels — provide a key to activate
 
@@ -38,10 +111,26 @@ export OPENAI_API_KEY=sk-...
 A channel with no key is simply skipped and recorded in `manifest.json`
 under `connectors_skipped` — the run continues with whatever is available.
 
+### SuperGrok subscription is not the standard API-key route
+
+xAI supports using a SuperGrok or X Premium subscription in named agent
+clients through its OAuth integration, including OpenCode. Researcher does
+not implement that interactive OAuth flow: its `grok` connector calls the xAI
+Responses API with `GROK_API_KEY`, whose team credits and balance are managed
+separately. An xAI 402/403 therefore stops that connector; it never silently
+spends through OpenRouter or Monid. To use the supported subscription route,
+run Researcher from a compatible OAuth client. To retrieve raw public X posts
+instead, explicitly select the separate Monid connector below.
+
+Sources: [xAI OpenCode OAuth announcement](https://x.ai/news/grok-opencode),
+[xAI API FAQ](https://docs.x.ai/grok/faq), and
+[xAI Management API](https://docs.x.ai/developers/rest-api-reference/management).
+
 ## Gated / opt-in connectors
 
 | Connector | Env var(s) | Notes |
 |---|---|---|
+| x | `MONID_API_KEY` | off by default; explicit pay-per-use public X retrieval through Monid. `discover` and `inspect` are free; the runner prints the compatible route and quoted unit price before `run`. No fallback from `grok`. |
 | meta-ads | `META_ADS_TOKEN` | free Meta Ad Library token; auto-skipped without it |
 | launch-radar (PH slice) | `PRODUCTHUNT_TOKEN` | optional free read token; the other three sources need nothing |
 | telegram | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `DEEP_RESEARCH_TELEGRAM_ACK=separate-account` | off by default; needs a Telethon `*.session` in the secrets dir; see the security section below |
@@ -104,12 +193,13 @@ directory defaults to `~/.config/zbs-researcher/secrets` and is overridable:
 export DEEP_RESEARCH_SECRETS_DIR=~/.config/deep-research/secrets
 ```
 
-File names checked: `gemini-key.txt`, `grok-api-key.txt`, `openai-api-key.txt`
+File names checked: `gemini-key.txt`, `grok-api-key.txt`, `monid-key.txt`
+(or `monid-api-key.txt`), `openai-api-key.txt`
 (or `openai-key.txt` / `openai.txt`), `perplexity-key.txt`,
 `openrouter-key.txt` (LLM lenses **and** transcription), `groq-key.txt`,
 `meta-ads-token.txt`,
 `producthunt-token.txt`, `scrapecreators-key.txt`, `threads-access-token.txt`,
-`telegram-api-id.txt`,
+`parallel-key.txt`, `telegram-api-id.txt`,
 `telegram-api-hash.txt`. Each file may hold the bare key or a `KEY = value`
 line — the first match wins. Env vars take over when no file is found.
 
@@ -136,7 +226,7 @@ across every channel. Flags (single mode ignores them):
 | `--paid-all` | off | run paid lenses on **all** N entities (raises the budget) |
 | `--dry-run` | off | enumerate + write `research-plan.md` with the call budget, then stop (no fan-out, no paid calls) |
 
-Free channels (hackernews, github-issues, reddit, bluesky) run with **zero
+Free channels (hackernews, github-issues, reddit) run with **zero
 keys** on all N entities; the paid lenses (grok/gemini/perplexity, or one
 OpenRouter key) enrich the top-K. Cost/time is reported honestly in
 `manifest.json` (real token usage where the vendor returns it, else a labeled
@@ -163,6 +253,20 @@ earlier the moment a round surfaces no new leads — and the paid lenses
 the breadth, paid fires are saved for the leads that matter. A `--fire` on
 a keyless paid source refuses up front, naming the missing keys — no
 surprise paid calls.
+
+`--fire x` is also paid, but by Monid rather than by an LLM token provider.
+It is never included in a default run or entity fan-out. The connector first
+uses Monid's free discovery and inspection endpoints, prints the selected
+provider endpoint and quoted unit price, and only then sends the paid `run`.
+The receipt says `actual` only when Monid returns actual billing; otherwise it
+keeps the catalog amount explicitly labeled `quoted`.
+
+Each paid fire has one connector-specific total HTTP wall-clock deadline (60 to
+600 seconds for the current paid routes), not a renewable per-chunk wait. A timeout writes
+an owner-only `.ERROR.md` artifact and atomically appends a call receipt whose
+cost is explicitly unavailable. Before the run can enter the official duel,
+that receipt must be reconciled by `call_id` to a conservative USD amount so an
+unknown provider charge cannot bypass the Researcher budget.
 
 ### Cartographer relay (opt-in)
 
@@ -198,7 +302,8 @@ and no network call is made.
 
 ```bash
 python3 "$SKILL_DIR/scripts/eval_harness.py" "<question>" \
-    --beast-dir RUN_DIR --baseline parallel --processor ultra
+    --beast-dir RUN_DIR --baseline parallel --processor ultra \
+    --artifact-dir PRIVATE_ARTIFACT_DIR
 ```
 
 Runs the same question through Parallel's deep-research Task API and scores
@@ -211,11 +316,74 @@ key is sitting right there, and the harness says so in its output. The list
 price of the chosen processor is printed *before* the call (`ultra` $0.30,
 `pro` $0.10 per run; the vendor bills successful runs only).
 
-Deep research can take up to ~45 minutes. A run that does not finish in that
-window is reported as `unavailable - parallel did not finish...` rather than
-scored as a zero — an opponent that timed out has not lost on the merits.
-Parallel does not date its citations, so its freshness axis reads `unknown`
-instead of guessing.
+Those prices are the official list-price snapshot verified on 2026-08-14; the
+vendor's current bill remains the source of truth. The CLI accepts only the
+four priced deep-research choices (`pro`, `pro-fast`, `ultra`, `ultra-fast`),
+so an unknown or higher-cost processor cannot slip through on a warning.
+
+Parallel currently documents 5-25 minutes for `ultra`; the harness keeps a
+wider 45-minute hard stop for queue and polling delays. A run that does not
+finish in that window is reported as `unavailable - parallel did not finish...`
+rather than scored as a zero — an opponent that timed out has not lost on the
+merits. Parallel does not date its citations, so its freshness axis reads
+`unknown` instead of guessing. The JSONL row records the selected processor and
+the published per-run list price separately from the unknown final bill.
+
+`--artifact-dir` closes the audit trail for a real duel. It writes the complete
+Parallel result, a readable Markdown answer, normalized citation receipts with
+explicit counted/excluded reasons, and an outcome record containing run ID,
+UTC start/end, duration, final state, processor, list price, and the official
+pricing/processor references. Internal artifact names are relative; credential
+values and personal absolute paths are redacted. Each file is atomically
+replaced with mode `0600` and the directory is private on POSIX. The flag is
+rejected for the free web-index baseline, whose existing behavior is unchanged.
+
+### Five-question live duel controller (internal)
+
+```bash
+python3 "$SKILL_DIR/scripts/duel_benchmark.py" init \
+    --confirm-price-checked
+```
+
+Initialization copies the committed `benchmarks/duel-v1.json` into an ignored
+private bundle, records its digest, git SHA, Python/plugin versions, USD 1.50
+Parallel and USD 10 Researcher caps, provider-availability booleans, and a
+24-hour deadline. Each lens also records whether it is direct, an OpenRouter
+fallback, a Telegram client session, or a pay-per-use vendor route. The probe
+reuses Researcher's own offline detector, so it does not drift from runtime key
+and session resolution. `--confirm-price-checked` means the operator has just opened
+the official Parallel price and processor pages. It records no secret, performs
+no provider request, and sets `paid_authorized: false`.
+
+The workflow is `snapshot-researcher` → `run-parallel` → `blind` → manual AI
+audit and owner scoring → `report`. `run-parallel` without `--confirm-paid`
+prints Ultra, USD 0.30, remaining budget, and readiness, then exits without a
+call. With confirmation it can run only after that question's Researcher plan,
+manifest, raw evidence, and synthesis are frozen. Completed answers cannot be
+rerun; `--retry-technical` is legal only after a preserved technical failure.
+An incomplete Researcher attempt is preserved with
+`snapshot-researcher --technical-failure-reason "..."`; the command rejects a
+completed but disappointing answer and keeps cumulative reported vendor spend
+within the USD 10 Researcher cap.
+
+Every paid `manifest.calls[]` row must have a unique `call_id`, provider,
+`cost_class: "paid"`, and `cost_receipt`. Actual or estimated receipt amounts
+count directly. When the provider exposes no amount, add one `manifest.costs[]`
+entry with its conservative USD accounting amount, basis, status, and
+`call_ids`; snapshots fail closed on missing, duplicate, or unknown coverage.
+
+`blind` writes neutral A/B Markdown, a private mapping, and pending audit and
+judgment forms. A completed audit lists every load-bearing claim with its
+citations, citation-fit verdict, fact date, freshness, support status, and
+evidence note, alongside recommendations, omissions, contradictions, and the
+critical-error review. `report` refuses an empty or invalid ledger or missing
+scores, applies the three-
+point per-question margin and critical-error veto, and requires three question
+wins overall. Objective depth/freshness/social coverage, time, and cost stay
+outside the five quality scores. Runtime paths are relative inside mode-0600
+files under the mode-0700 ignored bundle. No duel command publishes, uploads,
+merges, or invokes Monid; the separate `--fire x` connector is outside the duel
+controller and remains explicit-only.
 
 ## Budget note
 
@@ -245,7 +413,8 @@ into research output.
 | github | `api.github.com` (or your authed `gh` CLI) | query text | none (optional `gh` auth = higher rate limit) | on |
 | github-issues | `api.github.com` (or `gh`) | query text | none (optional `gh` auth) | on |
 | reddit | `arctic-shift.photon-reddit.com` | query text + candidate subreddit names | none | on |
-| bluesky | `public.api.bsky.app` | query text | none | on |
+| x | `api.monid.ai`, then the compatible allowlisted provider selected by Monid | query text and `Latest` search parameters | `MONID_API_KEY` / `monid-key.txt`; Monid forwards the request to the displayed underlying provider | **off — opt-in, pay-per-use** |
+| bluesky | `public.api.bsky.app` | query text | none | **off — opt-in, best-effort** |
 | youtube | `youtube.com` / `googlevideo.com` via the local `yt-dlp` tool; audio then goes to whichever transcription route is configured (see above) | query text (as a YouTube search), then caption tracks and — only when captions are unusable — the audio of the top videos | none for search/captions; the transcription route needs its own credential | on, degrades to ERROR.md without `yt-dlp` |
 | launch-radar | `hn.algolia.com`, `yc-oss.github.io`, `api.github.com`; with token also `api.producthunt.com` | query text (the yc-oss pull is a plain list download — no query sent) | none; optional `PRODUCTHUNT_TOKEN` | on |
 | revenue-radar | `api.flippa.com`, `substack.com` | nothing topic-specific — category/list pulls, filtered locally | none | on |
@@ -274,11 +443,15 @@ Non-connector components:
   `DEEP_RESEARCH_CARTOGRAPHER_URL` themselves (same shape as the signals
   relay: no shipped endpoint, no token, non-HTTPS refused, local append
   first, relay claimed only after a real 2xx).
-- **`eval_harness.py`**: its only network call is the web-index baseline —
-  the question text goes to `api.search.brave.com` **only** when
-  `BRAVE_API_KEY` / `brave-key.txt` is configured. Without a key the
-  baseline row reads "unavailable", the run side still scores, and no
-  network I/O happens.
+- **`eval_harness.py`**: the default web-index baseline sends the question text
+  to `api.search.brave.com` **only** when `BRAVE_API_KEY` / `brave-key.txt` is
+  configured. The optional Parallel baseline sends the same question text to
+  `api.parallel.ai/v1/tasks/runs` only after explicit
+  `--baseline parallel`; `PARALLEL_API_KEY` / `parallel-key.txt` travels in the
+  `x-api-key` header, never the URL or output. Without the selected provider's
+  key the baseline reads "unavailable", the run side still scores, and no
+  provider call is made. No result file, manifest, or prior research evidence
+  is sent to either baseline.
 - **Media backend** (`media_backend.py`, used by **youtube and tiktok-ig**):
   where audio bytes go depends on the resolved transcription route —
   `api.groq.com` (Groq Whisper — Groq's own OpenAI-*compatible* route, not

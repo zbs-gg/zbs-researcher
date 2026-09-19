@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "case_id": "duel-v1-q02-2026-08-14",
+  "question": "For a production coding or AI agent in 2026, when should a team choose Mem0, Letta, or a custom memory layer? What failure modes are practitioners actually seeing, and which remain unresolved?",
+  "captured_on": "2026-08-14",
+  "historical": true,
+  "current_version_tested": false,
+  "owner_judgment_complete": false,
+  "winner": null,
+  "origin": "duel-v1-20260814T131921Z / q02",
+  "methods": [
+    {
+      "id": "researcher",
+      "label": "ZBS Researcher — historical investigate workflow",
+      "answer_file": "researcher.md",
+      "source_sha256": "40e889acf1f3ed71dedcddce766f7bb859d3526d6b47dc22938f330c5c8daaac",
+      "excerpt_sha256": "7708206ef8d8c730c225520ce1057a66fff625abdc70fb54e2979839728091e8",
+      "extraction": "Full saved synthesis with an added historical-status header; no rewritten findings."
+    },
+    {
+      "id": "parallel",
+      "label": "Parallel Task API Ultra — completed attempt 001",
+      "answer_file": "parallel.md",
+      "source_sha256": "95626f6360e01b7237ee1019458ec0b3490270327556c9d6e447b9bb38a4e450",
+      "excerpt_sha256": "8bac46b850d588a8dd41574c95708ba9fde278908618fbfe7c33bf5e13ac0c78",
+      "extraction": "Original lines 1–171: narrative and references 1–17, with an added historical-status header. Repetitive raw evidence appendix omitted."
+    }
+  ],
+  "limitations": [
+    "Not a matched test of version 0.7.0 or current competing services.",
+    "One illustrative case selected for concrete issue-driven differences; not a representative win rate.",
+    "Owner blind judgments were incomplete; no winner is declared and no mappings/judgments were edited.",
+    "Question was shared; orchestration, stopping rules, output length and instrumentation were not fully matched.",
+    "Archived claims and cited product facts were not revalidated for today's product versions.",
+    "Reddit failed in this ZBS run; Letta incident evidence was thinner than the Mem0 sample.",
+    "No matched Grok/Gemini/ChatGPT/manual-workflow run is represented by this pair.",
+    "Archived cost bases and host-account usage are not comparable invoices; no cost or speed advantage is claimed."
+  ]
+}

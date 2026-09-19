@@ -10,8 +10,8 @@
   "plugins": [
     {
       "name": "deep-research",
-      "description": "Plan-first project-local multi-channel deep research + Claude synthesis. No Anthropic/OpenAI API spend by default.",
-      "version": "0.6.0",
+      "description": "Goal-driven bilingual research with social/video evidence, HTML playbook, agent JSON and project-local source storage. No Anthropic/OpenAI API spend by default.",
+      "version": "0.7.0",
       "author": {
         "name": "ZBS",
         "url": "https://github.com/zbs-gg"

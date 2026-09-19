@@ -355,6 +355,13 @@ class TieringTest(unittest.TestCase):
         paid = sum(1 for c in cells if c["tier"] == "paid")
         return free, paid
 
+    def test_default_free_channels_exclude_bluesky(self):
+        self.assertEqual(
+            entity_fanout.FREE_ENTITY_CHANNELS,
+            ("hackernews", "github-issues", "reddit"),
+        )
+        self.assertNotIn("bluesky", entity_fanout.FREE_ENTITY_CHANNELS)
+
     def test_hybrid_default(self):
         cells, rep = entity_fanout.plan_cells(
             self._ents(5), {"grok": "x", "gemini": "y"},

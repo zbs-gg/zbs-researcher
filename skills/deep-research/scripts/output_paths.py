@@ -188,6 +188,8 @@ def allocate_run_directory(project_root, topic, run_date=None, name_max=None):
     """Atomically reserve and return a unique project-local research run."""
     project_root = Path(project_root).resolve()
     research_root = project_root / RESEARCH_DIR_NAME
+    if research_root.is_symlink():
+        raise ValueError('research root must not be a symlink')
     try:
         research_root.mkdir(exist_ok=True)
     except FileExistsError as exc:

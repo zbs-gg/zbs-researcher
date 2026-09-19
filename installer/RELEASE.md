@@ -1,5 +1,22 @@
 # Releasing the installer to npm
 
+## Release — 0.7.0
+
+Version bump authorized on 2026-09-05; GitHub and npm publication explicitly
+authorized on 2026-09-19. At release start npm reports 0.5.0 and origin/main
+carries plugin 0.6.0. npm authentication is missing; shim publication is pending
+the owner's login. GitHub authentication is available.
+
+Before publishing, integrate with current main through a release PR, preserve
+0.6.0 history, include the prepared runtime/reference files and rerun the full
+suite, 10-step self-test and package inspection. Publish the GitHub plugin
+before the npm shim; verify each channel independently. Qualification and
+distribution receipts belong in specs/006-release-comparison/quickstart.md.
+
+The side-by-side documentation uses a 2026-08-14 historical pair. Do not relabel
+it as a new 0.7.0 benchmark when releasing. Update candidate/published labels
+only after verifying the actual distribution state.
+
 The package is the thin `npx` shim in this directory. The plugin itself is
 installed by the `claude` CLI, not by npm — so this package stays tiny and its
 only job is to run two commands.

@@ -29,10 +29,16 @@ from datetime import datetime, timezone
 # meaningfully more than any web index surfaces; "no" = no web footprint.
 # Anything NOT listed here is treated as "yes" (rule 1 above).
 _REACHABILITY = {
+    "reddit-web": ("yes", "model-reported discovery from search-index results; direct reading still required"),
+    "reddit-thread": ("partial", "targeted archive post/comment sample; archive completeness and indexing are unknown"),
+    "reddit-live": ("partial", "targeted live post/comment sample; bounded and not guaranteed absent from web indexes"),
+    "youtube-social": ("partial", "captions and bounded comment bodies; does not establish exclusivity over web search"),
     "telegram": ("no",
                  "client-session Telegram communities leave no web footprint"),
     "grok": ("partial",
              "live X content — a web index sees only the indexed scraps"),
+    "x": ("partial",
+          "direct X posts via Monid — a web index sees only the indexed scraps"),
     "reddit": ("partial",
                "Arctic-Shift full archive vs the top-of-Google slice "
                "a web index surfaces"),
@@ -53,7 +59,7 @@ _UNKNOWN_REASON = ("unknown source — assumed web-reachable "
 # Live-social "partial" sources where a fresh item flips to "no": content this
 # new predates any crawl. Telegram is already "no"; Reddit's "partial" is an
 # archive-depth story, not a pre-index one, so it stays put.
-_LIVE_SOCIAL = ("grok",)
+_LIVE_SOCIAL = ("grok", "x")
 PRE_INDEX_WINDOW_HOURS = 48
 
 
@@ -139,7 +145,7 @@ def provenance_record(source, query, items, newest_item_age_hours=None,
 
 # Display names for coverage markers: grok is the X lens, so its marker names
 # the platform a reader knows. Anything unlisted renders under its own name.
-_DISPLAY = {"grok": "grok/X"}
+_DISPLAY = {"grok": "grok/X", "x": "X via Monid"}
 
 
 def _display_name(source):

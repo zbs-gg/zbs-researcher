@@ -250,8 +250,8 @@ class BriefRenderTest(unittest.TestCase):
                  "repo": "mem0ai/mem0", "stars": 61000, "desc": "memory layer for agents",
                  "cells": {
                      "hackernews": {"status": "ok", "path": "entities/mem0/hackernews.md"},
-                     "bluesky": {"status": "error", "error": "HTTP 403",
-                                 "path": "entities/mem0/bluesky.ERROR.md"}}},
+                     "reddit": {"status": "error", "error": "HTTP 403",
+                                "path": "entities/mem0/reddit.ERROR.md"}}},
                 {"name": "zep", "rank": 1, "sources": ["github"], "repo": "getzep/zep",
                  "stars": 4700, "cells": {
                      "hackernews": {"status": "ok", "path": "entities/zep/hackernews.md"}}},

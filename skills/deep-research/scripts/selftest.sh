@@ -28,9 +28,22 @@ files = {
     "cli": root / "skills/deep-research/scripts/deep-research.py",
 }
 texts = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+active_skill = texts['skill']
+goal_workflow = (root / 'skills/deep-research/references/goal-driven.md').read_text(encoding='utf-8')
+legacy_workflow = (root / 'skills/deep-research/references/legacy-workflow.md').read_text(encoding='utf-8')
+# Preserve the legacy contract without loading its competing intake by default.
+texts['skill'] += '\n' + legacy_workflow
 
 forbidden = ("~/research", "~/elle", "/Users/nikshilov", "$HOME/research", "${HOME}/research")
 problems = []
+for marker in ('references/goal-driven.md', 'playbook.html', 'agent-context.json'):
+    if marker not in active_skill:
+        problems.append('active skill is missing goal-driven entry marker: ' + marker)
+if len(active_skill.splitlines()) > 500:
+    problems.append('active skill must route optional legacy details instead of loading them all')
+for marker in ('research_session.py', 'prepare', 'finalize', 'model_reported', 'seed', 'reserve'):
+    if marker not in goal_workflow:
+        problems.append('goal workflow is missing: ' + marker)
 for name, text in texts.items():
     for value in forbidden:
         if value in text:
@@ -71,6 +84,11 @@ required_markers = {
         'SCRIPT="$SKILL_DIR/scripts/deep-research.py"',
         "not the pitch — quality is",
         "saved locally to inform the next run",
+        "STEP I-1 — DECOMPOSE",
+        "STEP I3.5 — DATE AND GRADE EVERY CLAIM",
+        "A date — of the FACT, not of the page",
+        "T4 — unsupported",
+        "older than **12 months**",
     ),
     "readme": (
         "complete skill-authored bundle",
@@ -122,6 +140,24 @@ if (
         "--feedback"
     )
 
+# A synthesis may sound current while carrying dead claims. Preserve the
+# mandatory sequence that turns a vague question into dated, graded evidence
+# before the report is written.
+ordered_claim_markers = (
+    "STEP I-1 — DECOMPOSE",
+    "STEP I3.5 — DATE AND GRADE EVERY CLAIM",
+    "A date — of the FACT, not of the page",
+    "T4 — unsupported",
+    "older than **12 months**",
+    "STEP I4 — SYNTHESIZE",
+)
+claim_positions = [skill.find(marker) for marker in ordered_claim_markers]
+if any(position < 0 for position in claim_positions) or claim_positions != sorted(claim_positions):
+    problems.append(
+        "skill must decompose first, then date + tier claims, enforce T4 and "
+        "12-month staleness, and only then synthesize"
+    )
+
 if "${CLAUDE_PLUGIN_ROOT}" in skill:
     problems.append("skill commands must not depend on CLAUDE_PLUGIN_ROOT")
 
@@ -159,6 +195,28 @@ runs=("$PROJECT"/research/deep-research-*)
 test "${#runs[@]}" -eq 1
 echo "   prepared plan-first handoff reused exactly one run"
 
+# The official duel may be initialized and inspected with every host key still
+# present, but initialization is offline and cannot authorize a paid attempt.
+DUEL_DIR="$OUT/duel-v1-selftest"
+python3 "$HERE/duel_benchmark.py" init --bundle "$DUEL_DIR" >/dev/null
+python3 - "$ROOT" "$DUEL_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root, bundle = map(Path, sys.argv[1:])
+suite = json.loads((root / "benchmarks/duel-v1.json").read_text(encoding="utf-8"))
+frozen = json.loads((bundle / "suite.json").read_text(encoding="utf-8"))["suite"]
+preflight = json.loads((bundle / "preflight.json").read_text(encoding="utf-8"))
+if len(suite["questions"]) != 5 or frozen["questions"] != suite["questions"]:
+    raise SystemExit("duel preflight did not freeze the exact five-question suite")
+if preflight["paid_authorized"] is not False:
+    raise SystemExit("duel initialization authorized paid work")
+if preflight["pricing_checked_for_live_run"] is not False:
+    raise SystemExit("selftest must not claim a live price check")
+print("   duel-v1 froze five questions and authorized no paid work")
+PY
+
 echo "3/10 plugin metadata agreement…"
 python3 - "$ROOT" <<'PY'
 import json
@@ -187,7 +245,7 @@ for ref in hook_refs:
         )
 marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
 listed = next(item for item in marketplace["plugins"] if item["name"] == plugin["name"])
-expected = "0.6.0"
+expected = "0.7.0"
 if plugin["version"] != expected or listed["version"] != expected:
     raise SystemExit(
         f"version mismatch: plugin={plugin['version']} marketplace={listed['version']} expected={expected}"

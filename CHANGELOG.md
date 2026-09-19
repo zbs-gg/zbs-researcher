@@ -1,5 +1,97 @@
 # Changelog
 
+## 0.7.0 — 2026-09-19
+
+Prepared 2026-09-05; publication authorized 2026-09-19. The GitHub plugin and npm
+installer are separate distribution channels; see installer/RELEASE.md for status.
+
+### Project-local research storage
+
+- New goal-driven runs separate raw captures and processed analysis; the working
+  dossier lives in processed/dossier.json. Final HTML/JSON stay at run root.
+- Preparation/export maintain research/INDEX.md and index.json inside the
+  launching project only; artifacts.json records file roles, sizes and hashes.
+- Offline index rebuild detects changed dossiers/inventories and broken exports.
+  User index conflicts and symlink escapes fail closed; flat legacy runs remain
+  compatible without migration. No new service or provider charges.
+
+### Goal-driven research and auditable sources
+
+- **Goal-driven bilingual research and two deliverables.** The skill now starts
+  from the decision, supplied links, source languages and approved budget;
+  checks needed services offline; and follows seeds, leads and contradictions.
+  `research_session.py` validates source references, direct-vs-model evidence,
+  coverage, action support and paths, then exports an offline `playbook.html`
+  and matching `agent-context.json`. Partial access stays visibly partial.
+- **Read social evidence, preserve limits.** Explicit `reddit-web`,
+  `reddit-thread`, `reddit-live` and `youtube-social` routes add citation-led
+  discovery, known-post comments and bounded YouTube replies. Social video
+  reading cannot silently bill audio transcription. Grok/Perplexity retain
+  returned source/tool metadata, use current-date prompts, and xAI cost ticks
+  normalize to actual USD. Legacy runner modes stay available. Existing
+  installations need an update to load the new workflow.
+
+- **Explicit public X source through Monid.** `--fire x` and `--only x` now
+  discover and inspect an allowlisted Monid route, announce its quoted unit
+  price before the paid run, preserve actual billing only when returned, and
+  render auditable posts with canonical links. It is default-off and never a
+  hidden fallback for a failed Grok/xAI or OpenRouter call. Bluesky is also
+  default-off but remains explicitly selectable. Configuration docs now
+  distinguish a standard xAI API key from supported SuperGrok OAuth clients.
+- **Auditable investigate calls.** `--fire` now retains provider routing,
+  timing, token usage, and actual vendor cost fields when available. Paid HTTP
+  reads have a portable total wall-clock deadline; timeouts keep a private
+  atomic error and cost-unavailable receipt. Fires into one run directory are
+  serialized across processes, and the private manifest is replaced atomically,
+  preventing slow paid calls from losing or overwriting each other's receipts.
+- **Private five-question duel controller.** The first official Researcher vs
+  Parallel benchmark now has a frozen English suite and `init`,
+  `snapshot-researcher`, `run-parallel`, `blind`, and `report` commands. It
+  preserves raw attempts, gates current-price acknowledgment separately from
+  per-call paid consent, allows only technical retries, and fails closed on
+  incomplete blind audits or scores. Runtime answers stay ignored and private;
+  nothing is published or merged automatically.
+- **Fail-closed duel accounting and claim audit.** Researcher snapshots now
+  reconcile every paid call receipt to an actual, estimated, or conservative
+  unavailable USD amount before applying the USD 10 cap. Blind audits now use
+  a validated claim ledger with citation fit, fact date, freshness, support
+  status, and an evidence note. Every runtime directory is mode `0700` on POSIX.
+- **Paid Parallel baseline, explicit only.** A stored researcher run can now be
+  compared with Parallel's Task API on the same depth, freshness, and native
+  social axes. `--baseline parallel` is the only activation path; a configured
+  key alone never spends. The CLI names the selected processor and verified
+  list price before the call, restricts selection to the priced pro/ultra
+  deep-research variants, and persists that price basis in `eval-log.jsonl`.
+- **Reproducible paid-run receipts.** Optional `--artifact-dir` persistence now
+  keeps the full Parallel response, readable answer, normalized counted and
+  excluded citations, run ID/state/timing, processor, and published price
+  basis. Bundle paths stay relative; files are atomically written with private
+  permissions and scrubbed of keys and personal absolute paths.
+- **Honest comparison failures.** Missing keys, failed starts, timeouts, and
+  empty results remain explicit unavailable states while the researcher side
+  is still scored. Parallel's undated citations remain `unknown`, never
+  artificially fresh or zero.
+- **Two real-duel scorer fixes.** Structured citation lists (`excerpts`) now
+  count like singular excerpts without duplicate inflation, and corporate
+  help/docs/blog pages on social domains no longer masquerade as native social
+  conversation. YouTube spoken-content evidence is counted consistently with
+  the existing provenance model.
+- **Claims are dated and graded before synthesis.** Investigate now decomposes
+  vague human questions, marks load-bearing claims T1-T4 using the date of the
+  fact, bars T4 from support, and moves claims older than 12 months without
+  current T1/T2 confirmation into an explicit stale/historical section.
+- **Spec Kit initialized.** The repository carries a versioned constitution,
+  living spec/plan/tasks, and Codex workflow skills. Originally implemented
+  before this version bump.
+
+### Installation and comparison
+
+- Local Codex skill installation uses the existing account; the npm shim remains
+  a Claude Code installer. README distinguishes these routes and published state.
+- A dated, same-question ZBS/Parallel comparison includes preserved answer text,
+  source/excerpt hashes, strengths and limitations. It is a historical example,
+  not a fresh 0.7.0 benchmark or a completed blind evaluation.
+
 ## 0.6.0 — 2026-08-09
 
 Research that checks whether an answer is true, not just whether it sounds good.
